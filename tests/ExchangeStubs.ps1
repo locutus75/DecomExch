@@ -1,0 +1,31 @@
+# Lege stand-ins voor Exchange-cmdlets zodat Pester ze kan mocken op een machine zonder Exchange.
+# De parameters komen overeen met wat de module gebruikt.
+
+function global:Get-ExchangeServer { param($Identity, $ErrorAction) }
+function global:Get-MailboxDatabase { param($Identity, $Server, [switch]$Status, $ErrorAction) }
+function global:Get-Mailbox {
+    param($Identity, $Database, $ResultSize, [switch]$Arbitration, [switch]$AuditLog, [switch]$AuxAuditLog,
+        [switch]$Monitoring, [switch]$PublicFolder, $ErrorAction)
+}
+function global:Get-RemoteMailbox { param($ResultSize, $ErrorAction) }
+function global:Get-MailboxStatistics { param($Identity, $Database, $ErrorAction) }
+function global:Remove-StoreMailbox { param($Database, $Identity, $MailboxState, [switch]$Confirm, $ErrorAction) }
+function global:Get-MoveRequest { param($ResultSize, $ErrorAction) }
+function global:Remove-MoveRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-MigrationBatch { param($ErrorAction) }
+function global:Remove-MigrationBatch { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-MailboxExportRequest { param($ErrorAction) }
+function global:Remove-MailboxExportRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-MailboxImportRequest { param($ErrorAction) }
+function global:Remove-MailboxImportRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-MailboxRestoreRequest { param($ErrorAction) }
+function global:Remove-MailboxRestoreRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-SendConnector { param($ErrorAction) }
+function global:Get-ReceiveConnector { param($Server, $ErrorAction) }
+function global:Get-DatabaseAvailabilityGroup { param($ErrorAction) }
+function global:Get-EdgeSubscription { param($ErrorAction) }
+function global:Get-ClientAccessService { param($Identity, $ErrorAction) }
+function global:Get-HybridConfiguration { param($ErrorAction) }
+function global:Get-ExchangeCertificate { param($Server, $Thumbprint, $ErrorAction) }
+function global:Remove-ExchangeCertificate { param($Server, $Thumbprint, [switch]$Confirm, $ErrorAction) }
+function global:Get-AuthConfig { param($ErrorAction) }
