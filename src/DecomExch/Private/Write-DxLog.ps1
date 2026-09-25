@@ -23,6 +23,11 @@ function Write-DxLog {
         default   { Write-Verbose $Message }
     }
 
+    # Laatste regels bewaren voor de webinterface (logboek).
+    if ($null -eq $script:DxLogBuffer) { $script:DxLogBuffer = New-Object System.Collections.Generic.List[object] }
+    $script:DxLogBuffer.Add([pscustomobject]@{ Tijd = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); Niveau = $Level; Bericht = $Message })
+    if ($script:DxLogBuffer.Count -gt 500) { $script:DxLogBuffer.RemoveRange(0, $script:DxLogBuffer.Count - 500) }
+
     if ($script:DxLogFile) {
         try {
             Add-Content -Path $script:DxLogFile -Value $line -Encoding UTF8 -ErrorAction Stop -WhatIf:$false -Confirm:$false

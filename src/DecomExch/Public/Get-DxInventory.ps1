@@ -76,7 +76,7 @@ function Get-DxInventory {
 
     $inventory['Losgekoppelde mailboxen'] = Invoke-DxSafe -Section 'Losgekoppelde mailboxen' -Action {
         Get-MailboxDatabase | ForEach-Object {
-            Get-MailboxStatistics -Database $_.Identity -ErrorAction SilentlyContinue |
+            Get-MailboxStatistics -Database $_.Name -ErrorAction SilentlyContinue |
                 Where-Object { $_.DisconnectDate } |
                 Select-Object DisplayName, Database, DisconnectDate, DisconnectReason, MailboxGuid,
                     @{ n = 'TotalItemSize'; e = { "$($_.TotalItemSize)" } }
