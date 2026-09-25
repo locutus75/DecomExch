@@ -62,6 +62,16 @@ Describe 'DecomExch remote verbinding' {
             $message | Should -Match 'Verbinden met ex01\.contoso\.local mislukt: Access is denied'
         }
 
+        It 'onthoudt de inloggegevens ook als de eerste poging mislukt' {
+            Mock -ModuleName DecomExch New-DxExchangeSession { throw 'Kerberos: 0x80090311' }
+            try { Connect-DxExchange -Server 'ex01.contoso.local' -Credential $global:DxTestCredential -Authentication Negotiate } catch { }
+            InModuleScope DecomExch {
+                $script:DxCredential.UserName | Should -Be 'contoso\beheerder'
+                $script:DxAuthentication | Should -Be 'Negotiate'
+                $script:DxAuthentication = 'Kerberos'
+            }
+        }
+
         It 'weigert -Credential zonder -Server' {
             $message = $null
             try { Connect-DxExchange -Credential $global:DxTestCredential } catch { $message = $_.Exception.Message }
@@ -114,6 +124,18 @@ Describe 'DecomExch remote verbinding' {
         }
     }
 
+    Context 'Get-DxConnectionHint' {
+        It 'geeft een gerichte oplossing per soort fout' {
+            InModuleScope DecomExch {
+                Get-DxConnectionHint -Message 'errorcode 0x80090311 occurred: your domain isn''t available' | Should -Match 'domeincontroller'
+                Get-DxConnectionHint -Message 'Kerberos authentication cannot be used with implicit credentials if the client computer is not joined to a domain' | Should -Match '-Credential'
+                Get-DxConnectionHint -Message 'add the destination computer to the WinRM TrustedHosts configuration' -Server 'ex01' -Authentication Negotiate | Should -Match "TrustedHosts -Value 'ex01'"
+                Get-DxConnectionHint -Message 'Access is denied.' | Should -Match 'RemotePowerShellEnabled'
+                Get-DxConnectionHint -Message 'iets anders' | Should -Match 'poort 80'
+            }
+        }
+    }
+
     Context 'Webinterface' {
         It 'toont server en account in de status en geeft het wachtwoord niet door' {
             InModuleScope DecomExch {
@@ -146,6 +168,15 @@ Describe 'DecomExch remote verbinding' {
             Assert-MockCalled -ModuleName DecomExch Connect-DxExchange -Times 1 -Exactly -Scope It -ParameterFilter {
                 $Server -eq 'ex02.contoso.local' -and $Credential.UserName -eq 'contoso\beheerder'
             }
+        }
+
+        It 'gebruikt de gekozen aanmeldmethode en weigert een onbekende' {
+            Mock -ModuleName DecomExch Connect-DxExchange { }
+            InModuleScope DecomExch {
+                Invoke-DxApiRoute -Method POST -Path '/api/connect' -Body ([pscustomobject]@{ server = 'ex02'; authentication = 'Negotiate' }) -State @{} | Out-Null
+                { Invoke-DxApiRoute -Method POST -Path '/api/connect' -Body ([pscustomobject]@{ server = 'ex02'; authentication = 'Digest' }) -State @{} } | Should -Throw -ExceptionType ([System.ArgumentException])
+            }
+            Assert-MockCalled -ModuleName DecomExch Connect-DxExchange -Times 1 -Exactly -Scope It -ParameterFilter { $Authentication -eq 'Negotiate' }
         }
     }
 }

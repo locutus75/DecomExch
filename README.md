@@ -61,6 +61,18 @@ met de server; de Exchange-beheertools zijn daarvoor niet nodig.
   gaat nooit via de browser.
 - Public folders naar PST exporteren gaat via Outlook op de laptop zelf, met het Outlook-profiel.
 
+### Problemen met verbinden
+
+| Melding | Oorzaak en oplossing |
+|---|---|
+| `0x80090311` / *your domain isn't available* | De laptop kan geen domeincontroller van het domein van het account bereiken; Kerberos heeft die nodig. Maak verbinding met het netwerk of de VPN van de organisatie en controleer DNS (`nltest /dsgetdc:<domein>`). Of start DecomExch op een computer in het domein of op de Exchange-server zelf. |
+| *Kerberos ... implicit credentials ... not joined to a domain* | De laptop zit niet in het domein: geef een account op met `-Credential <domein>\<gebruiker>`. |
+| *TrustedHosts* | Bij `Negotiate` of `Basic` moet de server in TrustedHosts staan: als beheerder `Set-Item WSMan:\localhost\Client\TrustedHosts -Value <server> -Concatenate -Force`. Of Exchange die methoden accepteert, hangt af van de configuratie van de PowerShell-virtuele map. |
+| *Access is denied* | Verkeerd wachtwoord, of het account is geen Exchange-beheerder of mag geen remote PowerShell gebruiken. |
+
+In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de inloggegevens van
+`-Credential` worden daarbij hergebruikt, ook als de eerste poging bij het starten mislukte.
+
 ## Wat kan het?
 
 **Onderzoek en rapportage** (alleen lezen, uitvoer als HTML-rapport + CSV)
