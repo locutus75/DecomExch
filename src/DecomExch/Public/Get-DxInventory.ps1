@@ -3,7 +3,8 @@ function Get-DxInventory {
     .SYNOPSIS
         Inventariseert de Exchange-organisatie (alleen lezen).
     .DESCRIPTION
-        Verzamelt servers, databases, mailboxen per type, aanvragen, connectors,
+        Verzamelt servers, databases, mailboxen (met grootte en laatste aanmelding),
+        public folders, aanvragen, connectors,
         domeinen, certificaten en hybride configuratie. Het resultaat is een
         geordende hashtable met per onderdeel een lijst objecten, geschikt voor
         Export-DxReport.
@@ -12,7 +13,10 @@ function Get-DxInventory {
     #>
     [CmdletBinding()]
     param(
-        [switch]$SkipMailboxDetails
+        [switch]$SkipMailboxDetails,
+
+        [ValidateRange(1, 3650)]
+        [int]$InactiveDays = 90
     )
 
     Assert-DxExchangeShell
@@ -62,9 +66,12 @@ function Get-DxInventory {
 
     if (-not $SkipMailboxDetails) {
         $inventory['Mailboxen'] = Invoke-DxSafe -Section 'Mailboxen' -Action {
-            Get-Mailbox -ResultSize Unlimited |
-                Select-Object DisplayName, PrimarySmtpAddress, RecipientTypeDetails, Database, WhenCreated
+            Get-DxMailboxReport -InactiveDays $InactiveDays | Sort-Object Database, DisplayName
         }
+    }
+
+    $inventory['Public folders'] = Invoke-DxSafe -Section 'Public folders' -Action {
+        Get-DxPublicFolderReport | Sort-Object Map
     }
 
     $inventory['Losgekoppelde mailboxen'] = Invoke-DxSafe -Section 'Losgekoppelde mailboxen' -Action {

@@ -19,8 +19,9 @@ Describe 'DecomExch' {
             }
         }
 
-        It 'alle verwijderfuncties ondersteunen -WhatIf' {
-            foreach ($name in 'Clear-DxExchangeLog', 'Remove-DxStaleRequest', 'Remove-DxDisconnectedMailbox', 'Remove-DxExpiredCertificate') {
+        It 'alle verwijder- en exportfuncties ondersteunen -WhatIf' {
+            foreach ($name in 'Clear-DxExchangeLog', 'Remove-DxStaleRequest', 'Remove-DxDisconnectedMailbox', 'Remove-DxExpiredCertificate',
+                'Export-DxMailboxToPst', 'Export-DxPublicFolderToPst') {
                 (Get-Command $name).Parameters.ContainsKey('WhatIf') | Should -BeTrue
             }
         }
@@ -80,9 +81,14 @@ Describe 'DecomExch' {
         }
 
         It 'schrijft het logbestand ook in simulatiemodus' {
-            $logFile = Set-DxLogFile -Path (Join-Path $TestDrive 'dxlog')
-            Clear-DxExchangeLog -Path $root -OlderThanDays 14 -WhatIf | Out-Null
-            Get-Content -Path $logFile -Raw | Should -Match 'Logopruiming'
+            try {
+                $logFile = Set-DxLogFile -Path (Join-Path $TestDrive 'dxlog')
+                Clear-DxExchangeLog -Path $root -OlderThanDays 14 -WhatIf | Out-Null
+                Get-Content -Path $logFile -Raw | Should -Match 'Logopruiming'
+            }
+            finally {
+                InModuleScope DecomExch { $script:DxLogFile = $null }
+            }
         }
 
         It 'verwijdert oude logs en laat de rest staan' {
@@ -232,6 +238,217 @@ Describe 'DecomExch' {
             ($checks | Where-Object Check -eq 'Eigen receive connectors').Status | Should -Be 'Waarschuwing'
             ($checks | Where-Object Check -eq 'Laatste Exchange-server').Status | Should -Be 'Waarschuwing'
             ($checks | Where-Object Check -eq 'Verplaatsaanvragen').Status | Should -Be 'Blokkerend'
+        }
+    }
+
+    Context 'Hulpfuncties' {
+        It 'zet Exchange-groottes om naar MB' {
+            InModuleScope DecomExch {
+                ConvertTo-DxMegabyte -Size '1.5 GB (1,610,612,736 bytes)' | Should -Be 1536
+                ConvertTo-DxMegabyte -Size '0 B (0 bytes)' | Should -Be 0
+                ConvertTo-DxMegabyte -Size 10485760 | Should -Be 10
+                ConvertTo-DxMegabyte -Size 'Unlimited' | Should -BeNullOrEmpty
+                ConvertTo-DxMegabyte -Size $null | Should -BeNullOrEmpty
+            }
+        }
+
+        It 'maakt veilige bestandsnamen' {
+            InModuleScope DecomExch {
+                ConvertTo-DxSafeFileName -Name 'jan.de.vries@contoso.com' | Should -Be 'jan.de.vries_contoso.com'
+                ConvertTo-DxSafeFileName -Name 'Map: "Verkoop/Inkoop"' | Should -Be 'Map_Verkoop_Inkoop'
+            }
+        }
+    }
+
+    Context 'Get-DxMailboxReport' {
+        BeforeAll {
+            Mock -ModuleName DecomExch Get-MailboxDatabase { [pscustomobject]@{ Name = 'DB01' } }
+            Mock -ModuleName DecomExch Get-MailboxStatistics {
+                [pscustomobject]@{ MailboxGuid = 'g1'; TotalItemSize = '2 GB (2,147,483,648 bytes)'; ItemCount = 1000; LastLogonTime = (Get-Date).AddDays(-5); DisconnectDate = $null }
+                [pscustomobject]@{ MailboxGuid = 'g2'; TotalItemSize = '10 MB (10,485,760 bytes)';   ItemCount = 5;    LastLogonTime = (Get-Date).AddDays(-400); DisconnectDate = $null }
+                [pscustomobject]@{ MailboxGuid = 'g9'; TotalItemSize = '1 MB (1,048,576 bytes)';     ItemCount = 1;    LastLogonTime = $null; DisconnectDate = (Get-Date) }
+            }
+            Mock -ModuleName DecomExch Get-Mailbox {
+                [pscustomobject]@{ DisplayName = 'Jan';  PrimarySmtpAddress = 'jan@contoso.com';  RecipientTypeDetails = 'UserMailbox';   ExchangeGuid = 'g1'; ArchiveGuid = [guid]::NewGuid(); WhenCreated = (Get-Date) }
+                [pscustomobject]@{ DisplayName = 'Info'; PrimarySmtpAddress = 'info@contoso.com'; RecipientTypeDetails = 'SharedMailbox'; ExchangeGuid = 'g2'; ArchiveGuid = [guid]::Empty;     WhenCreated = (Get-Date) }
+                [pscustomobject]@{ DisplayName = 'Nieuw'; PrimarySmtpAddress = 'n@contoso.com';   RecipientTypeDetails = 'UserMailbox';   ExchangeGuid = 'g3'; ArchiveGuid = [guid]::Empty;     WhenCreated = (Get-Date) }
+            }
+        }
+
+        It 'combineert mailboxen met statistieken en bepaalt inactiviteit' {
+            $rows = @(Get-DxMailboxReport -InactiveDays 90)
+            $rows.Count | Should -Be 3
+
+            $jan = $rows | Where-Object DisplayName -eq 'Jan'
+            $jan.GrootteMB | Should -Be 2048
+            $jan.Archief | Should -BeTrue
+            $jan.Inactief | Should -BeFalse
+
+            ($rows | Where-Object DisplayName -eq 'Info').Inactief | Should -BeTrue
+            ($rows | Where-Object DisplayName -eq 'Info').Archief | Should -BeFalse
+            ($rows | Where-Object DisplayName -eq 'Nieuw').Inactief | Should -BeTrue
+        }
+
+        It 'werkt ook als statistieken geen DisconnectDate/LastLogonTime bevatten' {
+            Mock -ModuleName DecomExch Get-MailboxStatistics { [pscustomobject]@{ MailboxGuid = 'g1'; TotalItemSize = '1 MB (1,048,576 bytes)'; ItemCount = 1 } }
+            $rows = @(Get-DxMailboxReport)
+            ($rows | Where-Object DisplayName -eq 'Jan').GrootteMB | Should -Be 1
+            ($rows | Where-Object DisplayName -eq 'Jan').Inactief | Should -BeTrue
+        }
+    }
+
+    Context 'Get-DxPublicFolderReport' {
+        It 'geeft pad, grootte en mail-enabled adres' {
+            Mock -ModuleName DecomExch Get-MailPublicFolder { [pscustomobject]@{ EntryId = 'E1'; PrimarySmtpAddress = 'verkoop@contoso.com' } }
+            Mock -ModuleName DecomExch Get-PublicFolderStatistics {
+                [pscustomobject]@{ Name = 'Verkoop'; FolderPath = @('Afdelingen', 'Verkoop'); ItemCount = 12; TotalItemSize = '5 MB (5,242,880 bytes)'; LastModificationTime = (Get-Date); EntryId = 'E1' }
+                [pscustomobject]@{ Name = 'Archief'; FolderPath = @('Archief'); ItemCount = 0; TotalItemSize = '0 B (0 bytes)'; LastModificationTime = $null; EntryId = 'E2' }
+            }
+
+            $rows = @(Get-DxPublicFolderReport)
+            $rows[0].Map | Should -Be '\Afdelingen\Verkoop'
+            $rows[0].GrootteMB | Should -Be 5
+            $rows[0].MailEnabled | Should -Be 'verkoop@contoso.com'
+            $rows[1].MailEnabled | Should -Be ''
+        }
+    }
+
+    Context 'Export-DxMailboxToPst' {
+        BeforeAll {
+            Mock -ModuleName DecomExch Get-Mailbox {
+                [pscustomobject]@{ Identity = 'contoso/jan'; DisplayName = 'Jan'; Alias = 'jan'; RecipientTypeDetails = 'UserMailbox'; ArchiveGuid = [guid]::NewGuid() }
+                [pscustomobject]@{ Identity = 'contoso/info'; DisplayName = 'Info'; Alias = 'info'; RecipientTypeDetails = 'SharedMailbox'; ArchiveGuid = [guid]::Empty }
+                [pscustomobject]@{ Identity = 'contoso/disc'; DisplayName = 'Discovery'; Alias = 'DiscoverySearchMailbox'; RecipientTypeDetails = 'DiscoveryMailbox'; ArchiveGuid = [guid]::Empty }
+            }
+            Mock -ModuleName DecomExch New-MailboxExportRequest { }
+            Mock -ModuleName DecomExch Test-Path { $true } -ParameterFilter { $LiteralPath -like '\\*' }
+        }
+
+        It 'weigert een lokaal pad' {
+            { Export-DxMailboxToPst -All -FilePath 'D:\PST' } | Should -Throw
+        }
+
+        It 'maakt niets aan met -WhatIf' {
+            $result = @(Export-DxMailboxToPst -All -FilePath '\\fs01\pst$' -IncludeArchive -WhatIf)
+            $result.Count | Should -Be 3
+            @($result | Where-Object Status -ne 'Simulatie').Count | Should -Be 0
+            Assert-MockCalled -ModuleName DecomExch New-MailboxExportRequest -Times 0 -Exactly -Scope It
+        }
+
+        It 'exporteert alle normale mailboxen plus archief, zonder systeemmailboxen' {
+            $result = @(Export-DxMailboxToPst -All -FilePath '\\fs01\pst$\' -IncludeArchive -Confirm:$false)
+            $result.Count | Should -Be 3
+            ($result | Where-Object { $_.Mailbox -eq 'Jan' -and $_.Soort -eq 'Archief' }).Bestand | Should -Be '\\fs01\pst$\jan_Archief.pst'
+            @($result | Where-Object Mailbox -eq 'Discovery').Count | Should -Be 0
+            Assert-MockCalled -ModuleName DecomExch New-MailboxExportRequest -Times 3 -Exactly -Scope It
+            Assert-MockCalled -ModuleName DecomExch New-MailboxExportRequest -Times 1 -Exactly -Scope It -ParameterFilter { $IsArchive -and $FilePath -eq '\\fs01\pst$\jan_Archief.pst' }
+            Assert-MockCalled -ModuleName DecomExch New-MailboxExportRequest -Times 1 -Exactly -Scope It -ParameterFilter { -not $IsArchive -and $FilePath -eq '\\fs01\pst$\info.pst' -and $Name -eq 'DecomExch_info' }
+        }
+
+        It 'exporteert zonder -IncludeArchive alleen de primaire mailbox' {
+            Export-DxMailboxToPst -Identity 'jan@contoso.com' -FilePath '\\fs01\pst$' -Confirm:$false | Out-Null
+            Assert-MockCalled -ModuleName DecomExch New-MailboxExportRequest -Times 0 -Exactly -Scope It -ParameterFilter { $IsArchive }
+        }
+
+        It 'meldt een mislukte aanvraag zonder af te breken' {
+            Mock -ModuleName DecomExch New-MailboxExportRequest { throw 'Toegang geweigerd' }
+            $result = @(Export-DxMailboxToPst -All -FilePath '\\fs01\pst$' -Confirm:$false)
+            @($result | Where-Object Status -eq 'Mislukt').Count | Should -Be 2
+            $result[0].Fout | Should -Match 'Toegang geweigerd'
+        }
+    }
+
+    Context 'Export-DxMailboxToPst ontdubbelen' {
+        It 'exporteert een dubbel opgegeven mailbox maar een keer' {
+            Mock -ModuleName DecomExch Get-Mailbox { [pscustomobject]@{ Identity = 'contoso/jan'; DisplayName = 'Jan'; Alias = 'jan'; RecipientTypeDetails = 'UserMailbox'; ArchiveGuid = [guid]::Empty } }
+            Mock -ModuleName DecomExch New-MailboxExportRequest { }
+            Mock -ModuleName DecomExch Test-Path { $true } -ParameterFilter { $LiteralPath -like '\\*' }
+            $result = @(Export-DxMailboxToPst -Identity 'jan', 'jan@contoso.com' -FilePath '\\fs01\pst$' -Confirm:$false)
+            $result.Count | Should -Be 1
+            Assert-MockCalled -ModuleName DecomExch New-MailboxExportRequest -Times 1 -Exactly -Scope It
+        }
+    }
+
+    Context 'Get-DxPstExportStatus' {
+        It 'combineert aanvragen met hun statistieken' {
+            Mock -ModuleName DecomExch Get-MailboxExportRequest { [pscustomobject]@{ Identity = 'r1'; Name = 'DecomExch_jan'; Mailbox = 'jan'; BatchName = 'B1' } }
+            Mock -ModuleName DecomExch Get-MailboxExportRequestStatistics { [pscustomobject]@{ Status = 'InProgress'; PercentComplete = 40; BytesTransferred = '1 GB'; FilePath = '\\fs01\pst$\jan.pst'; SourceAlias = 'jan' } }
+
+            $rows = @(Get-DxPstExportStatus)
+            $rows.Count | Should -Be 1
+            $rows[0].Status | Should -Be 'InProgress'
+            $rows[0].Procent | Should -Be 40
+            $rows[0].Mailbox | Should -Be 'jan'
+        }
+    }
+
+    Context 'Export-DxPublicFolderToPst' {
+        BeforeAll {
+            function New-FakeFolder([string]$Name, [object[]]$Children = @(), [int]$ItemCount = 0) {
+                $folder = [pscustomobject]@{ Name = $Name; Folders = $Children; Items = [pscustomobject]@{ Count = $ItemCount } }
+                $folder | Add-Member -MemberType ScriptMethod -Name CopyTo -Value { param($target) $global:DxCopied += $this.Name }
+                $folder
+            }
+
+            $global:DxFakeRoot = New-FakeFolder -Name 'Alle public folders' -Children @(
+                (New-FakeFolder -Name 'Afdelingen' -Children @((New-FakeFolder -Name 'Verkoop' -ItemCount 12))),
+                (New-FakeFolder -Name 'Archief' -ItemCount 3)
+            )
+
+            Mock -ModuleName DecomExch New-DxOutlookNamespace {
+                $ns = [pscustomobject]@{ Stores = @() }
+                $ns | Add-Member -MemberType ScriptMethod -Name GetDefaultFolder -Value { param($id) $global:DxFakeRoot }
+                $ns | Add-Member -MemberType ScriptMethod -Name AddStoreEx -Value {
+                    param($path, $type)
+                    $global:DxAddedStore = $path
+                    $store = [pscustomobject]@{ FilePath = $path }
+                    $store | Add-Member -MemberType ScriptMethod -Name GetRootFolder -Value { [pscustomobject]@{ Name = 'PST' } }
+                    $this.Stores = @($store)
+                }
+                $ns | Add-Member -MemberType ScriptMethod -Name RemoveStore -Value { param($f) $global:DxRemovedStore = $true }
+                $ns
+            }
+        }
+
+        BeforeEach {
+            $global:DxCopied = @()
+            $global:DxAddedStore = $null
+            $global:DxRemovedStore = $false
+        }
+
+        AfterAll {
+            Remove-Variable -Name DxFakeRoot, DxCopied, DxAddedStore, DxRemovedStore -Scope Global -ErrorAction SilentlyContinue
+        }
+
+        It 'zoekt mappen op pad, hoofdletterongevoelig' {
+            InModuleScope DecomExch {
+                (Resolve-DxOutlookFolder -Root $global:DxFakeRoot -Path '\afdelingen\VERKOOP').Name | Should -Be 'Verkoop'
+                { Resolve-DxOutlookFolder -Root $global:DxFakeRoot -Path '\Bestaat\Niet' } | Should -Throw
+            }
+        }
+
+        It 'kopieert niets en koppelt geen PST met -WhatIf' {
+            $result = @(Export-DxPublicFolderToPst -FolderPath '\' -FilePath (Join-Path $TestDrive 'pf.pst') -WhatIf)
+            $result.Count | Should -Be 2
+            $global:DxCopied.Count | Should -Be 0
+            $global:DxAddedStore | Should -BeNullOrEmpty
+        }
+
+        It 'kopieert alle mappen op het hoogste niveau en ontkoppelt de PST' {
+            $pst = Join-Path $TestDrive 'pf.pst'
+            $result = @(Export-DxPublicFolderToPst -FolderPath '\' -FilePath $pst -Confirm:$false)
+            ($global:DxCopied -join ',') | Should -Be 'Afdelingen,Archief'
+            @($result | Where-Object Status -eq 'Geexporteerd').Count | Should -Be 2
+            $global:DxAddedStore | Should -Be $pst
+            $global:DxRemovedStore | Should -BeTrue
+        }
+
+        It 'exporteert een specifieke submap naar een map met automatische bestandsnaam' {
+            $result = @(Export-DxPublicFolderToPst -FolderPath '\Afdelingen\Verkoop' -FilePath (Join-Path $TestDrive 'pstmap') -Confirm:$false)
+            $result[0].Map | Should -Be '\Afdelingen\Verkoop'
+            $result[0].Items | Should -Be 12
+            $result[0].Bestand | Should -Match 'PublicFolders_\d{8}_\d{6}\.pst$'
+            ($global:DxCopied -join ',') | Should -Be 'Verkoop'
         }
     }
 

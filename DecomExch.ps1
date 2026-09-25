@@ -1,23 +1,26 @@
 <#
 .SYNOPSIS
-    DecomExch - opruimen en uitfaseren van een on-premises Exchange-server.
+    DecomExch - onderzoeken, rapporteren, exporteren naar PST, opruimen en uitfaseren
+    van een on-premises Exchange-server.
 
 .DESCRIPTION
     Start zonder parameters een interactief menu. Met -Action kan een taak ook
     zonder menu (bijv. gepland) worden uitgevoerd.
 
-    Het menu start ALTIJD in simulatiemodus: er wordt niets gewijzigd totdat
-    je de simulatiemodus uitzet en de actie expliciet bevestigt.
+    Het menu start ALTIJD in simulatiemodus: er wordt niets gewijzigd of geexporteerd
+    totdat je de simulatiemodus uitzet. Opruimacties vragen daarna nog om bevestiging.
 
     Draai dit script in de Exchange Management Shell als Organization Management,
-    of geef -ExchangeServer op om remote te verbinden.
+    of geef -ExchangeServer op om remote te verbinden. Public folders exporteren gaat via
+    Outlook en kan ook op een werkstation zonder Exchange-cmdlets.
 
 .PARAMETER Action
-    Menu (standaard), Inventory, Readiness, CleanLogs, CleanRequests,
-    CleanDisconnectedMailboxes, CleanCertificates.
+    Menu (standaard), Inventory, MailboxReport, PublicFolderReport, Readiness,
+    ExportMailboxes, ExportPublicFolders, PstStatus,
+    CleanLogs, CleanRequests, CleanDisconnectedMailboxes, CleanCertificates.
 
 .PARAMETER Execute
-    Alleen voor niet-interactieve opruimacties: voer de wijziging echt uit.
+    Alleen voor niet-interactieve export- en opruimacties: voer de actie echt uit.
     Zonder -Execute draait de actie als -WhatIf (simulatie).
 
 .EXAMPLE
@@ -27,14 +30,19 @@
     .\DecomExch.ps1 -Action Inventory -OutputPath D:\DecomExch
 
 .EXAMPLE
-    .\DecomExch.ps1 -Action Readiness -Server EX01
+    .\DecomExch.ps1 -Action ExportMailboxes -Mailbox jan@contoso.com -PstPath \\fs01\pst$ -IncludeArchive -Execute
+
+.EXAMPLE
+    .\DecomExch.ps1 -Action ExportPublicFolders -PublicFolder '\' -PstPath D:\PST -Execute
 
 .EXAMPLE
     .\DecomExch.ps1 -Action CleanLogs -Server EX01 -OlderThanDays 30 -Execute
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu', 'Inventory', 'Readiness', 'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates')]
+    [ValidateSet('Menu', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'Readiness',
+        'ExportMailboxes', 'ExportPublicFolders', 'PstStatus',
+        'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates')]
     [string]$Action = 'Menu',
 
     [string]$Server,
@@ -45,6 +53,19 @@ param(
 
     [ValidateRange(1, 3650)]
     [int]$OlderThanDays = 14,
+
+    [ValidateRange(1, 3650)]
+    [int]$InactiveDays = 90,
+
+    # Mailboxen voor ExportMailboxes; leeg = alle gebruikers-, gedeelde en resourcemailboxen.
+    [string[]]$Mailbox,
+
+    # UNC-share voor mailbox-PST's, of pad/map voor de public folder-PST.
+    [string]$PstPath,
+
+    [switch]$IncludeArchive,
+
+    [string[]]$PublicFolder = @('\'),
 
     [switch]$Execute
 )
@@ -59,20 +80,32 @@ function Initialize-Connection {
     if ($ExchangeServer) { Connect-DxExchange -Server $ExchangeServer } else { Connect-DxExchange }
 }
 
+function Read-Value {
+    param([string]$Prompt, [string]$Default)
+    $label = if ($Default) { "$Prompt [$Default]" } else { $Prompt }
+    $answer = Read-Host $label
+    if ([string]::IsNullOrWhiteSpace($answer)) { $Default } else { $answer.Trim() }
+}
+
 function Read-Server {
     param([string]$Default)
     $servers = @(Get-ExchangeServer | Sort-Object Name | ForEach-Object { $_.Name })
     if ($servers.Count -gt 0) { Write-Host ('Beschikbare servers: ' + ($servers -join ', ')) }
     if (-not $Default) { $Default = if ($servers -contains $env:COMPUTERNAME) { $env:COMPUTERNAME } else { $servers | Select-Object -First 1 } }
-    $answer = Read-Host "Server [$Default]"
-    if ([string]::IsNullOrWhiteSpace($answer)) { $Default } else { $answer.Trim() }
+    Read-Value -Prompt 'Server' -Default $Default
 }
 
 function Read-Days {
-    param([int]$Default)
-    $answer = Read-Host "Ouder dan hoeveel dagen? [$Default]"
+    param([string]$Prompt = 'Ouder dan hoeveel dagen?', [int]$Default)
     $value = 0
-    if ([int]::TryParse($answer, [ref]$value) -and $value -ge 1) { $value } else { $Default }
+    if ([int]::TryParse((Read-Host "$Prompt [$Default]"), [ref]$value) -and $value -ge 1) { $value } else { $Default }
+}
+
+function Read-YesNo {
+    param([string]$Prompt, [bool]$Default = $false)
+    $hint = if ($Default) { 'J/n' } else { 'j/N' }
+    $answer = (Read-Host "$Prompt [$hint]").Trim().ToUpper()
+    if (-not $answer) { $Default } else { $answer -in 'J', 'JA', 'Y', 'YES' }
 }
 
 function Confirm-Execution {
@@ -96,78 +129,134 @@ function Show-Checks {
     else { Write-Host "$blockers blokkerend(e) punt(en): los deze eerst op." -ForegroundColor Red }
 }
 
+function Show-Result {
+    param([object[]]$Result, [string]$Empty, [string[]]$Property)
+    if (@($Result).Count -eq 0) { Write-Host $Empty -ForegroundColor Green; return }
+    if ($Property) { $Result | Format-Table -Property $Property -AutoSize -Wrap | Out-String -Width 250 | Write-Host }
+    else { $Result | Format-Table -AutoSize -Wrap | Out-String -Width 250 | Write-Host }
+}
+
 function Invoke-Task {
     param(
         [string]$Name,
         [bool]$Simulate,
-        [string]$TargetServer,
-        [int]$Days
+        [hashtable]$Options
     )
 
     $whatIf = @{ WhatIf = $Simulate; Confirm = $false }
 
     switch ($Name) {
         'Inventory' {
-            $report = Get-DxInventory | Export-DxReport -Path $OutputPath -Title 'Exchange inventarisatie'
+            $report = Get-DxInventory -InactiveDays $Options.InactiveDays | Export-DxReport -Path $OutputPath -Title 'Exchange inventarisatie'
+            Write-Host "Rapport: $report" -ForegroundColor Green
+        }
+        'MailboxReport' {
+            $rows = @(Get-DxMailboxReport -InactiveDays $Options.InactiveDays | Sort-Object GrootteMB -Descending)
+            $totalGb = [math]::Round((($rows | Measure-Object -Property GrootteMB -Sum).Sum) / 1024, 1)
+            $inactive = @($rows | Where-Object Inactief).Count
+            Write-Host ("{0} mailbox(en), totaal {1} GB, {2} inactief (> {3} dagen niet aangemeld)." -f $rows.Count, $totalGb, $inactive, $Options.InactiveDays) -ForegroundColor Cyan
+            Show-Result -Result @($rows | Select-Object -First 15) -Empty 'Geen mailboxen gevonden.' `
+                -Property DisplayName, RecipientTypeDetails, GrootteMB, Items, Archief, LaatsteAanmelding, Inactief
+            $report = $rows | Export-DxReport -Path $OutputPath -Title 'Mailboxoverzicht'
+            Write-Host "Volledig rapport: $report" -ForegroundColor Green
+        }
+        'PublicFolderReport' {
+            $rows = @(Get-DxPublicFolderReport | Sort-Object Map)
+            $totalMb = [math]::Round(($rows | Measure-Object -Property GrootteMB -Sum).Sum, 1)
+            Write-Host ("{0} public folder(s), totaal {1} MB." -f $rows.Count, $totalMb) -ForegroundColor Cyan
+            $report = $rows | Export-DxReport -Path $OutputPath -Title 'Public folders'
             Write-Host "Rapport: $report" -ForegroundColor Green
         }
         'Readiness' {
-            $checks = @(Test-DxDecomReadiness -Server $TargetServer)
+            $checks = @(Test-DxDecomReadiness -Server $Options.Server)
             Show-Checks -Checks $checks
-            $report = $checks | Export-DxReport -Path $OutputPath -Title "Uitfaseringscontrole $TargetServer" -NoCsv
+            $report = $checks | Export-DxReport -Path $OutputPath -Title "Uitfaseringscontrole $($Options.Server)" -NoCsv
             Write-Host "Rapport: $report" -ForegroundColor Green
         }
+        'ExportMailboxes' {
+            $params = @{ FilePath = $Options.PstPath; IncludeArchive = [bool]$Options.IncludeArchive }
+            if ($Options.Database) { $params['Database'] = $Options.Database }
+            elseif ($Options.Mailbox) { $params['Identity'] = $Options.Mailbox }
+            else { $params['All'] = $true }
+
+            $result = @(Export-DxMailboxToPst @params @whatIf)
+            Show-Result -Result $result -Empty 'Geen mailboxen geselecteerd.' -Property Mailbox, Soort, Bestand, Status, Fout
+            if (-not $Simulate) { Write-Host 'Volg de voortgang via "Status van PST-exports".' -ForegroundColor Cyan }
+        }
+        'ExportPublicFolders' {
+            $result = @(Export-DxPublicFolderToPst -FolderPath $Options.PublicFolder -FilePath $Options.PstPath @whatIf)
+            Show-Result -Result $result -Empty 'Geen public folders gevonden.' -Property Map, Items, Bestand, Status, Fout
+        }
+        'PstStatus' {
+            $result = @(Get-DxPstExportStatus)
+            Show-Result -Result $result -Empty 'Geen PST-exportaanvragen gevonden.' -Property Aanvraag, Status, Procent, Overgezet, Bestand
+        }
         'CleanLogs' {
-            $result = Clear-DxExchangeLog -ComputerName $TargetServer -OlderThanDays $Days @whatIf
+            $result = Clear-DxExchangeLog -ComputerName $Options.Server -OlderThanDays $Options.Days @whatIf
             if ($Simulate) {
-                $files = @(Get-DxLogCleanupCandidate -ComputerName $TargetServer -OlderThanDays $Days)
+                $files = @(Get-DxLogCleanupCandidate -ComputerName $Options.Server -OlderThanDays $Options.Days)
                 $mb = [math]::Round((($files | Measure-Object -Property Length -Sum).Sum) / 1MB, 1)
                 Write-Host "Simulatie: $($files.Count) bestand(en), $mb MB zou worden verwijderd." -ForegroundColor Cyan
             }
-            elseif ($result) { $result | Format-List | Out-Host }
+            elseif ($result) { $result | Format-List | Out-String -Width 250 | Write-Host }
         }
         'CleanRequests' {
-            $result = @(Remove-DxStaleRequest @whatIf)
-            if ($result.Count -eq 0) { Write-Host 'Niets op te ruimen.' -ForegroundColor Green }
-            else { $result | Format-Table -AutoSize | Out-Host }
+            Show-Result -Result @(Remove-DxStaleRequest @whatIf) -Empty 'Niets op te ruimen.'
         }
         'CleanDisconnectedMailboxes' {
-            $result = @(Remove-DxDisconnectedMailbox -OlderThanDays $Days @whatIf)
-            if ($result.Count -eq 0) { Write-Host 'Geen losgekoppelde mailboxen gevonden.' -ForegroundColor Green }
-            else { $result | Format-Table Database, DisplayName, Reden, DisconnectDate, Verwijderd, Fout -AutoSize | Out-Host }
+            Show-Result -Result @(Remove-DxDisconnectedMailbox -OlderThanDays $Options.Days @whatIf) -Empty 'Geen losgekoppelde mailboxen gevonden.' `
+                -Property Database, DisplayName, Reden, DisconnectDate, Verwijderd, Fout
         }
         'CleanCertificates' {
             $params = @{}
-            if ($TargetServer) { $params['Server'] = $TargetServer }
-            $result = @(Remove-DxExpiredCertificate @params @whatIf)
-            if ($result.Count -eq 0) { Write-Host 'Geen verlopen certificaten gevonden.' -ForegroundColor Green }
-            else { $result | Format-Table Server, Subject, NotAfter, Services, Verwijderd, Opmerking -AutoSize -Wrap | Out-Host }
+            if ($Options.Server) { $params['Server'] = $Options.Server }
+            Show-Result -Result @(Remove-DxExpiredCertificate @params @whatIf) -Empty 'Geen verlopen certificaten gevonden.' `
+                -Property Server, Subject, NotAfter, Services, Verwijderd, Opmerking
         }
     }
 }
 
+$defaults = @{
+    Server       = $Server
+    Days         = $OlderThanDays
+    InactiveDays = $InactiveDays
+    Mailbox      = $Mailbox
+    Database     = $null
+    PstPath      = $PstPath
+    IncludeArchive = [bool]$IncludeArchive
+    PublicFolder = $PublicFolder
+}
+
 # --- Niet-interactief --------------------------------------------------------------
 if ($Action -ne 'Menu') {
-    Initialize-Connection
+    if ($Action -ne 'ExportPublicFolders') { Initialize-Connection }
     if ($Action -in 'Readiness', 'CleanLogs' -and -not $Server) {
         throw "Geef -Server op voor actie '$Action'."
     }
-    if (-not $Execute -and $Action -like 'Clean*') {
-        Write-Host 'Simulatiemodus (-WhatIf). Gebruik -Execute om echt te wijzigen.' -ForegroundColor Cyan
+    if ($Action -in 'ExportMailboxes', 'ExportPublicFolders' -and -not $PstPath) {
+        throw "Geef -PstPath op voor actie '$Action'."
     }
-    Invoke-Task -Name $Action -Simulate (-not $Execute) -TargetServer $Server -Days $OlderThanDays
+    if (-not $Execute -and ($Action -like 'Clean*' -or $Action -like 'Export*')) {
+        Write-Host 'Simulatiemodus (-WhatIf). Gebruik -Execute om echt uit te voeren.' -ForegroundColor Cyan
+    }
+    Invoke-Task -Name $Action -Simulate (-not $Execute) -Options $defaults
     return
 }
 
 # --- Interactief menu --------------------------------------------------------------
 $simulate = $true
 $menu = [ordered]@{
-    '1' = @{ Task = 'Inventory';                  Text = 'Inventarisatie maken (HTML/CSV-rapport)';               NeedsServer = $false; NeedsDays = $false; Changes = $false }
-    '2' = @{ Task = 'Readiness';                  Text = 'Uitfaseringscontrole voor een server';                  NeedsServer = $true;  NeedsDays = $false; Changes = $false }
-    '3' = @{ Task = 'CleanLogs';                  Text = 'Oude Exchange- en IIS-logbestanden opruimen';           NeedsServer = $true;  NeedsDays = $true;  Changes = $true }
-    '4' = @{ Task = 'CleanRequests';              Text = 'Afgeronde verplaats/export/import-aanvragen opruimen';  NeedsServer = $false; NeedsDays = $false; Changes = $true }
-    '5' = @{ Task = 'CleanDisconnectedMailboxes'; Text = 'Losgekoppelde mailboxen definitief verwijderen';        NeedsServer = $false; NeedsDays = $true;  Changes = $true }
-    '6' = @{ Task = 'CleanCertificates';          Text = 'Verlopen certificaten verwijderen';                     NeedsServer = $true;  NeedsDays = $false; Changes = $true }
+    '1'  = @{ Group = 'Onderzoek en rapportage'; Task = 'Inventory';                  Text = 'Volledige inventarisatie (HTML/CSV-rapport)' }
+    '2'  = @{ Group = 'Onderzoek en rapportage'; Task = 'MailboxReport';              Text = 'Mailboxoverzicht: grootte, archief, laatste aanmelding' }
+    '3'  = @{ Group = 'Onderzoek en rapportage'; Task = 'PublicFolderReport';         Text = 'Public folder-overzicht: items en grootte' }
+    '4'  = @{ Group = 'Onderzoek en rapportage'; Task = 'Readiness';                  Text = 'Uitfaseringscontrole voor een server' }
+    '5'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportMailboxes';            Text = 'Mailboxen exporteren naar PST' }
+    '6'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportPublicFolders';        Text = 'Public folders exporteren naar PST (via Outlook)' }
+    '7'  = @{ Group = 'Exporteren naar PST';     Task = 'PstStatus';                  Text = 'Status van PST-exports' }
+    '8'  = @{ Group = 'Opruimen';                Task = 'CleanLogs';                  Text = 'Oude Exchange- en IIS-logbestanden opruimen';          Confirm = $true }
+    '9'  = @{ Group = 'Opruimen';                Task = 'CleanRequests';              Text = 'Afgeronde verplaats/export/import-aanvragen opruimen'; Confirm = $true }
+    '10' = @{ Group = 'Opruimen';                Task = 'CleanDisconnectedMailboxes'; Text = 'Losgekoppelde mailboxen definitief verwijderen';       Confirm = $true }
+    '11' = @{ Group = 'Opruimen';                Task = 'CleanCertificates';          Text = 'Verlopen certificaten verwijderen';                    Confirm = $true }
 }
 
 try {
@@ -175,18 +264,22 @@ try {
 }
 catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
-    return
+    Write-Host 'Zonder Exchange-verbinding werkt alleen "Public folders exporteren naar PST (via Outlook)".' -ForegroundColor Yellow
 }
 
 while ($true) {
     Write-Host ''
-    Write-Host '==================== DecomExch ====================' -ForegroundColor Cyan
-    foreach ($key in $menu.Keys) { Write-Host (' {0}. {1}' -f $key, $menu[$key].Text) }
+    Write-Host '========================= DecomExch =========================' -ForegroundColor Cyan
+    $group = $null
+    foreach ($key in $menu.Keys) {
+        if ($menu[$key].Group -ne $group) { $group = $menu[$key].Group; Write-Host " $group" -ForegroundColor DarkCyan }
+        Write-Host ('  {0,2}. {1}' -f $key, $menu[$key].Text)
+    }
     Write-Host ''
-    $modeText = if ($simulate) { 'AAN (er wordt niets gewijzigd)' } else { 'UIT (wijzigingen worden uitgevoerd!)' }
+    $modeText = if ($simulate) { 'AAN (er wordt niets gewijzigd of geexporteerd)' } else { 'UIT (acties worden echt uitgevoerd!)' }
     $modeColor = if ($simulate) { 'Green' } else { 'Red' }
-    Write-Host ' S. Simulatiemodus: ' -NoNewline; Write-Host $modeText -ForegroundColor $modeColor
-    Write-Host ' Q. Afsluiten'
+    Write-Host '   S. Simulatiemodus: ' -NoNewline; Write-Host $modeText -ForegroundColor $modeColor
+    Write-Host '   Q. Afsluiten'
     Write-Host "Logbestand: $logFile" -ForegroundColor DarkGray
 
     $choice = (Read-Host 'Keuze').Trim().ToUpper()
@@ -195,16 +288,41 @@ while ($true) {
     if (-not $menu.Contains($choice)) { Write-Host 'Onbekende keuze.' -ForegroundColor Yellow; continue }
 
     $item = $menu[$choice]
+    $options = $defaults.Clone()
     try {
-        $target = if ($item.NeedsServer) { Read-Server -Default $Server } else { $null }
-        $days = if ($item.NeedsDays) { Read-Days -Default $OlderThanDays } else { $OlderThanDays }
+        switch ($item.Task) {
+            { $_ -in 'Readiness', 'CleanLogs', 'CleanCertificates' } { $options.Server = Read-Server -Default $Server }
+            { $_ -in 'CleanLogs', 'CleanDisconnectedMailboxes' } { $options.Days = Read-Days -Default $OlderThanDays }
+            { $_ -in 'Inventory', 'MailboxReport' } { $options.InactiveDays = Read-Days -Prompt 'Inactief na hoeveel dagen zonder aanmelding?' -Default $InactiveDays }
+            'ExportMailboxes' {
+                $options.PstPath = Read-Value -Prompt 'UNC-share voor de PST-bestanden (\\server\share)' -Default $PstPath
+                if ($options.PstPath -notmatch '^\\\\[^\\]+\\[^\\]+') {
+                    throw 'Geef een UNC-pad op (\\server\share): Exchange schrijft de PST zelf weg.'
+                }
+                $selection = Read-Value -Prompt 'Welke mailboxen? A = alle, D = per database, of namen/e-mailadressen gescheiden door komma''s' -Default 'A'
+                switch -Regex ($selection) {
+                    '^[Aa]$' { $options.Mailbox = $null }
+                    '^[Dd]$' {
+                        Write-Host ('Databases: ' + ((Get-MailboxDatabase | ForEach-Object { $_.Name }) -join ', '))
+                        $options.Database = @((Read-Value -Prompt 'Database(s), gescheiden door komma''s') -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                    }
+                    default { $options.Mailbox = @($selection -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+                }
+                $options.IncludeArchive = Read-YesNo -Prompt 'Ook online archieven exporteren?' -Default $true
+            }
+            'ExportPublicFolders' {
+                $defaultPst = if ($PstPath) { $PstPath } else { Join-Path $OutputPath 'PST' }
+                $options.PstPath = Read-Value -Prompt 'PST-bestand of map' -Default $defaultPst
+                $options.PublicFolder = @((Read-Value -Prompt 'Map(pen), bijv. \Afdelingen\Verkoop (\ = alles)' -Default '\') -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            }
+        }
 
-        if ($item.Changes -and -not $simulate -and -not (Confirm-Execution -What $item.Text)) {
+        if ($item.Confirm -and -not $simulate -and -not (Confirm-Execution -What $item.Text)) {
             Write-Host 'Geannuleerd.' -ForegroundColor Yellow
             continue
         }
 
-        Invoke-Task -Name $item.Task -Simulate $simulate -TargetServer $target -Days $days
+        Invoke-Task -Name $item.Task -Simulate $simulate -Options $options
     }
     catch {
         Write-Host "Fout: $($_.Exception.Message)" -ForegroundColor Red

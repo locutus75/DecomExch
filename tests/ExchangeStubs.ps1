@@ -14,7 +14,7 @@ function global:Get-MoveRequest { param($ResultSize, $ErrorAction) }
 function global:Remove-MoveRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
 function global:Get-MigrationBatch { param($ErrorAction) }
 function global:Remove-MigrationBatch { param($Identity, [switch]$Confirm, $ErrorAction) }
-function global:Get-MailboxExportRequest { param($ErrorAction) }
+function global:Get-MailboxExportRequest { param($BatchName, $ErrorAction) }
 function global:Remove-MailboxExportRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
 function global:Get-MailboxImportRequest { param($ErrorAction) }
 function global:Remove-MailboxImportRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
@@ -29,3 +29,7 @@ function global:Get-HybridConfiguration { param($ErrorAction) }
 function global:Get-ExchangeCertificate { param($Server, $Thumbprint, $ErrorAction) }
 function global:Remove-ExchangeCertificate { param($Server, $Thumbprint, [switch]$Confirm, $ErrorAction) }
 function global:Get-AuthConfig { param($ErrorAction) }
+function global:New-MailboxExportRequest { param($Mailbox, $FilePath, $Name, $BatchName, [switch]$IsArchive, [switch]$Confirm, $ErrorAction) }
+function global:Get-MailboxExportRequestStatistics { param($Identity, $ErrorAction) }
+function global:Get-PublicFolderStatistics { param($ResultSize, $ErrorAction) }
+function global:Get-MailPublicFolder { param($ResultSize, $ErrorAction) }
