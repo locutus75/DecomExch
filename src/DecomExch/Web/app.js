@@ -142,8 +142,12 @@
   function toast(message, kind = '') {
     const el = h('div', { class: 'toast ' + kind, role: 'status' },
       icon(kind === 'bad' ? 'warn' : kind === 'ok' ? 'check' : 'info'), h('div', null, message));
+    el.title = 'Klik om te sluiten';
+    el.addEventListener('click', () => el.remove());
     $('#toasts').appendChild(el);
-    setTimeout(() => el.remove(), kind === 'bad' ? 9000 : 5000);
+    // Lange meldingen (bijv. met een oplossing) blijven langer staan.
+    const base = kind === 'bad' ? 9000 : 5000;
+    setTimeout(() => el.remove(), Math.min(45000, Math.max(base, String(message).length * 70)));
   }
 
   function dialog({ title, message, danger = false, iconName = 'info', confirmLabel = 'OK', cancelLabel = 'Annuleren', requireText = null, body = null }) {
@@ -1045,9 +1049,13 @@
     const accountHint = s.account
       ? `Er wordt verbonden als ${s.account} (opgegeven met -Credential bij het starten).`
       : 'Er wordt verbonden met je huidige Windows-account. Voor een ander account: start opnieuw met -Credential.';
+    const auth = h('select', { class: 'input', 'aria-label': 'Aanmeldmethode' },
+      ['Kerberos', 'Negotiate', 'Basic'].map((m) => h('option', { value: m, text: m, selected: m === (s.authentication || 'Kerberos') })));
     const body = h('div', { class: 'form' },
       h('div', { class: 'field' }, h('label', { text: 'Exchange-server (leeg = lokale Exchange Management Shell)' }), server,
-        h('span', { class: 'hint', text: `Verbinding via http://<server>/PowerShell. Gebruik de volledige servernaam. ${accountHint}` })));
+        h('span', { class: 'hint', text: `Verbinding via http://<server>/PowerShell. Gebruik de volledige servernaam. ${accountHint}` })),
+      h('div', { class: 'field' }, h('label', { text: 'Aanmeldmethode' }), auth,
+        h('span', { class: 'hint', text: 'Kerberos is de standaard en heeft een bereikbare domeincontroller nodig. Negotiate (NTLM) vereist dat de server in TrustedHosts staat; Basic moet op de server zijn ingeschakeld.' })));
     const current = s.connected
       ? `Nu verbonden${s.organization ? ' met ' + s.organization : ''}${s.exchangeServer ? ' via ' + s.exchangeServer : ''}${s.account ? ' als ' + s.account : ''}.`
       : 'Maak verbinding om de organisatie te onderzoeken.';
@@ -1056,7 +1064,7 @@
     const t = h('div', { class: 'busy fixed' }, h('div', { class: 'busy-inner' }, h('div', { class: 'spinner' }), 'Verbinden...'));
     document.body.appendChild(t);
     try {
-      await api('POST', '/api/connect', { server: server.value.trim() });
+      await api('POST', '/api/connect', { server: server.value.trim(), authentication: auth.value });
       state.cache = {}; state.servers = null; state.databases = null;
       await refreshStatus();
       toast(state.status.connected ? 'Verbonden met Exchange.' : 'Verbinden is niet gelukt.', state.status.connected ? 'ok' : 'bad');

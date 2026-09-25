@@ -150,6 +150,7 @@ function Invoke-DxApiRoute {
                 computer     = $env:COMPUTERNAME
                 exchangeServer = $script:DxExchangeServer
                 account      = if ($script:DxCredential) { $script:DxCredential.UserName } else { $null }
+                authentication = $script:DxAuthentication
                 version      = "$($MyInvocation.MyCommand.Module.Version)"
                 outputPath   = $State['OutputPath']
                 logFile      = $script:DxLogFile
@@ -160,7 +161,11 @@ function Invoke-DxApiRoute {
             $server = "$(Get-DxBodyValue -Body $Body -Name 'server' -Default '')".Trim()
             if ($server) {
                 # Inloggegevens van de start (-Credential) opnieuw gebruiken; het wachtwoord gaat nooit via de browser.
-                $params = @{ Server = $server; Authentication = $script:DxAuthentication }
+                $authentication = "$(Get-DxBodyValue -Body $Body -Name 'authentication' -Default $script:DxAuthentication)"
+                if ($authentication -notin 'Kerberos', 'Negotiate', 'Basic') {
+                    throw (New-Object System.ArgumentException "Onbekende aanmeldmethode: $authentication")
+                }
+                $params = @{ Server = $server; Authentication = $authentication }
                 if ($script:DxCredential) { $params['Credential'] = $script:DxCredential }
                 Connect-DxExchange @params
             }

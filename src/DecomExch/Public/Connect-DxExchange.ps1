@@ -51,22 +51,24 @@ function Connect-DxExchange {
         }
         if ($hasCredential) { $params['Credential'] = $Credential }
 
+        # Direct onthouden, zodat opnieuw proberen (bijv. vanuit de webinterface) dezelfde
+        # inloggegevens en methode gebruikt, ook als deze poging mislukt.
+        $script:DxAuthentication = $Authentication
+        if ($hasCredential) { $script:DxCredential = $Credential }
+
         $account = if ($hasCredential) { $Credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME".TrimStart('\') }
         Write-DxLog -Level Action -Message "Verbinden met Exchange op $Server als $account ($Authentication) ..."
         try {
             $connection = New-DxExchangeSession -SessionParameters $params
         }
         catch {
-            throw ("Verbinden met $Server mislukt: $($_.Exception.Message) " +
-                'Controleer de servernaam (gebruik bij Kerberos de volledige naam, bijv. ex01.contoso.local), ' +
-                'of poort 80 bereikbaar is en of het account Exchange-beheerder is.')
+            $detail = $_.Exception.Message
+            throw ("Verbinden met $Server mislukt: $detail " + (Get-DxConnectionHint -Message $detail -Server $Server -Authentication $Authentication -HasCredential $hasCredential))
         }
 
         $script:DxSession = $connection.Session
         $script:DxSessionModule = $connection.Module
         $script:DxExchangeServer = $Server
-        $script:DxAuthentication = $Authentication
-        $script:DxCredential = if ($hasCredential) { $Credential } else { $null }
     }
     elseif (Test-DxCommand -Name 'Get-ExchangeServer') {
         Write-DxLog -Level Success -Message 'Exchange-cmdlets zijn al beschikbaar.'
