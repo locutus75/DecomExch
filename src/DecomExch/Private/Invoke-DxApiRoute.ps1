@@ -80,10 +80,10 @@ function Get-DxOverview {
 
     $section = { param($name) if ($Inventory.Contains($name)) { @($Inventory[$name] | Where-Object { $null -ne $_ }) } else { @() } }
 
-    $mailboxes = & $section 'Mailboxen'
-    $publicFolders = & $section 'Public folders'
-    $certs = & $section 'Certificaten'
-    $moves = & $section 'Verplaatsaanvragen'
+    $mailboxes = @(& $section 'Mailboxen')
+    $publicFolders = @(& $section 'Public folders')
+    $certs = @(& $section 'Certificaten')
+    $moves = @(& $section 'Verplaatsaanvragen')
 
     $sizeMb = ($mailboxes | Where-Object { $_.PSObject.Properties['GrootteMB'] -and $null -ne $_.GrootteMB } | Measure-Object -Property GrootteMB -Sum).Sum
     $pfSizeMb = ($publicFolders | Where-Object { $_.PSObject.Properties['GrootteMB'] -and $null -ne $_.GrootteMB } | Measure-Object -Property GrootteMB -Sum).Sum
