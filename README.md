@@ -27,12 +27,39 @@ Veiligheid van de webinterface:
 
 - De webserver luistert alleen op `http://localhost` (standaard poort 8765, aan te passen met `-Port`).
 - Elke sessie krijgt een geheim token in de link; zonder dat token worden API-verzoeken geweigerd.
+- Inloggegevens (`-Credential`) blijven in PowerShell; de webinterface toont alleen de accountnaam.
 - De interface start altijd in **simulatiemodus**. De server weigert echte opruimacties zonder `JA`-bevestiging.
 - Geen externe bibliotheken of CDN's: werkt ook op servers zonder internettoegang.
 - Stoppen met Ctrl+C in de console of de knop **Afsluiten** in de interface.
 
 De webserver draait in de PowerShell-sessie en gebruikt de Exchange-verbinding daarvan; acties worden
 een voor een uitgevoerd. Grote inventarisaties kunnen enkele minuten duren.
+
+## Vanaf een beheerlaptop (remote)
+
+DecomExch hoeft niet op de Exchange-server zelf te draaien. Start het op je laptop en verbind remote
+met de server; de Exchange-beheertools zijn daarvoor niet nodig.
+
+```powershell
+# Met je huidige Windows-account
+.\DecomExch.ps1 -Action Web -ExchangeServer ex01.contoso.local
+
+# Met een ander account (vraagt om het wachtwoord)
+.\DecomExch.ps1 -Action Web -ExchangeServer ex01.contoso.local -Credential contoso\beheerder
+```
+
+- Werkt ook met het menu en de niet-interactieve acties (`-Action Inventory`, `CleanLogs`, ...).
+- Gebruik de volledige servernaam (FQDN); de verbinding loopt via `http://<server>/PowerShell`
+  (poort 80) met Kerberos. Andere methoden: `-Authentication Negotiate` of `Basic` (alleen als dat op
+  de PowerShell-virtuele map is ingeschakeld).
+- Vanaf een laptop buiten het domein kan Kerberos met `-Credential` werken als de laptop de
+  domeincontrollers en de Exchange-server op naam kan bereiken; lukt dat niet, gebruik dan een
+  laptop of beheerserver in het domein.
+- De inloggegevens blijven alleen in het geheugen van de PowerShell-sessie. Ze worden ook gebruikt om
+  logbestanden via `\\server\C$` op te ruimen (het account moet lokale beheerder zijn op de server en
+  SMB, poort 445, moet bereikbaar zijn) en bij opnieuw verbinden vanuit de webinterface. Het wachtwoord
+  gaat nooit via de browser.
+- Public folders naar PST exporteren gaat via Outlook op de laptop zelf, met het Outlook-profiel.
 
 ## Wat kan het?
 
@@ -117,7 +144,8 @@ daarom **Outlook**: er wordt een PST aan het Outlook-profiel gekoppeld, de gekoz
 
 ## Vereisten
 
-- Windows PowerShell 5.1 met de Exchange Management Shell, of een remote verbinding (`-ExchangeServer`).
+- Windows PowerShell 5.1 met de Exchange Management Shell, of een remote verbinding (`-ExchangeServer`,
+  eventueel met `-Credential`) vanaf bijvoorbeeld een beheerlaptop.
 - Rol *Organization Management*.
 - Voor het opruimen van logs op een andere server: lokale beheerder op die server (toegang via `\\server\C$`).
 - Voor PST-export: zie hierboven (rol *Mailbox Import Export*, share, en Outlook voor public folders).

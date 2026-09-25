@@ -1029,7 +1029,9 @@
     const s = state.status;
     $('#conn-dot').className = 'dot ' + (s.connected ? 'ok' : 'bad');
     $('#conn-text').textContent = s.connected ? `Verbonden${s.organization ? ' \u00b7 ' + s.organization : ''}` : 'Niet verbonden';
-    $('#foot-user').textContent = `${s.user || ''}${s.computer ? ' @ ' + s.computer : ''}  \u00b7  v${s.version || ''}`;
+    const via = [s.exchangeServer ? `server ${s.exchangeServer}` : (s.connected ? 'lokale Exchange Management Shell' : ''), s.account ? `als ${s.account}` : ''].filter(Boolean).join(' ');
+    $('#conn-pill').title = s.connected ? `Verbonden via ${via}. Klik om te wisselen.` : 'Klik om te verbinden met Exchange.';
+    $('#foot-user').textContent = `${s.account || s.user || ''}${s.computer ? ' @ ' + s.computer : ''}  \u00b7  v${s.version || ''}`;
   }
 
   async function refreshStatus() {
@@ -1038,11 +1040,18 @@
   }
 
   async function openConnectDialog() {
-    const server = h('input', { type: 'text', class: 'input', placeholder: 'ex01.contoso.local' });
+    const s = state.status;
+    const server = h('input', { type: 'text', class: 'input', placeholder: 'ex01.contoso.local', value: s.exchangeServer || '' });
+    const accountHint = s.account
+      ? `Er wordt verbonden als ${s.account} (opgegeven met -Credential bij het starten).`
+      : 'Er wordt verbonden met je huidige Windows-account. Voor een ander account: start opnieuw met -Credential.';
     const body = h('div', { class: 'form' },
       h('div', { class: 'field' }, h('label', { text: 'Exchange-server (leeg = lokale Exchange Management Shell)' }), server,
-        h('span', { class: 'hint', text: 'Er wordt verbonden met http://<server>/PowerShell met je huidige Windows-account (Kerberos).' })));
-    const ok = await dialog({ title: 'Verbinden met Exchange', message: state.status.connected ? `Nu verbonden${state.status.organization ? ' met ' + state.status.organization : ''}.` : 'Maak verbinding om de organisatie te onderzoeken.', iconName: 'plug', confirmLabel: 'Verbinden', body });
+        h('span', { class: 'hint', text: `Verbinding via http://<server>/PowerShell. Gebruik de volledige servernaam. ${accountHint}` })));
+    const current = s.connected
+      ? `Nu verbonden${s.organization ? ' met ' + s.organization : ''}${s.exchangeServer ? ' via ' + s.exchangeServer : ''}${s.account ? ' als ' + s.account : ''}.`
+      : 'Maak verbinding om de organisatie te onderzoeken.';
+    const ok = await dialog({ title: 'Verbinden met Exchange', message: current, iconName: 'plug', confirmLabel: 'Verbinden', body });
     if (!ok) return;
     const t = h('div', { class: 'busy fixed' }, h('div', { class: 'busy-inner' }, h('div', { class: 'spinner' }), 'Verbinden...'));
     document.body.appendChild(t);
