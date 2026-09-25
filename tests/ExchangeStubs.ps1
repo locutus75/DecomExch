@@ -34,3 +34,4 @@ function global:Get-MailboxExportRequestStatistics { param($Identity, $ErrorActi
 function global:Get-PublicFolderStatistics { param($ResultSize, $ErrorAction) }
 function global:Get-MailPublicFolder { param($ResultSize, $ErrorAction) }
 function global:Get-OrganizationConfig { param($ErrorAction) }
+function global:Set-ADServerSettings { param($ViewEntireForest, $ErrorAction) }

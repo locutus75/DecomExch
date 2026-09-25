@@ -31,6 +31,11 @@
     .\DecomExch.ps1 -Action Web
 
 .EXAMPLE
+    .\DecomExch.ps1 -Action Web -ExchangeServer ex01.contoso.local -Credential contoso\beheerder
+
+    Start de webinterface op een beheerlaptop en verbindt remote met EX01 als een ander account.
+
+.EXAMPLE
     .\DecomExch.ps1 -Action Inventory -OutputPath D:\DecomExch
 
 .EXAMPLE
@@ -51,7 +56,17 @@ param(
 
     [string]$Server,
 
+    # Exchange-server om remote mee te verbinden, bijv. vanaf een beheerlaptop (gebruik de volledige naam).
     [string]$ExchangeServer,
+
+    # Ander account voor de remote verbinding, bijv. contoso\beheerder (vraagt om het wachtwoord).
+    # Wordt ook gebruikt om logbestanden via \\server\C$ op te ruimen.
+    [System.Management.Automation.Credential()]
+    [pscredential]$Credential = [pscredential]::Empty,
+
+    # Authenticatie voor de remote verbinding; Kerberos is de standaard van Exchange.
+    [ValidateSet('Kerberos', 'Negotiate', 'Basic')]
+    [string]$Authentication = 'Kerberos',
 
     [string]$OutputPath = (Join-Path -Path $PSScriptRoot -ChildPath 'Output'),
 
@@ -82,13 +97,21 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Credential -ne [pscredential]::Empty -and -not $ExchangeServer) {
+    throw 'Geef ook -ExchangeServer op: -Credential wordt gebruikt voor de remote verbinding met die server.'
+}
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'src\DecomExch\DecomExch.psd1') -Force -DisableNameChecking
 
 $logFile = Set-DxLogFile -Path (Join-Path -Path $OutputPath -ChildPath 'Logs')
 
 function Initialize-Connection {
-    if (Get-Command -Name Get-ExchangeServer -ErrorAction SilentlyContinue) { return }
-    if ($ExchangeServer) { Connect-DxExchange -Server $ExchangeServer } else { Connect-DxExchange }
+    if ($ExchangeServer) {
+        Connect-DxExchange -Server $ExchangeServer -Credential $Credential -Authentication $Authentication
+    }
+    elseif (-not (Get-Command -Name Get-ExchangeServer -ErrorAction SilentlyContinue)) {
+        Connect-DxExchange
+    }
 }
 
 function Read-Value {

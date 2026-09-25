@@ -3,39 +3,74 @@ function Connect-DxExchange {
     .SYNOPSIS
         Zorgt voor een werkende Exchange-sessie.
     .DESCRIPTION
-        - Zijn de Exchange-cmdlets al geladen (Exchange Management Shell), dan gebeurt er niets.
-        - Met -Server wordt een remote PowerShell-sessie naar http://<server>/PowerShell geopend.
-        - Zonder -Server wordt geprobeerd de lokale Exchange Management Shell te laden.
+        - Met -Server wordt een remote PowerShell-sessie naar http://<server>/PowerShell geopend,
+          bijvoorbeeld vanaf een beheerlaptop. Een eerdere DecomExch-sessie wordt eerst gesloten,
+          zodat je ook naar een andere server kunt overstappen.
+        - Zonder -Server: zijn de Exchange-cmdlets al geladen (Exchange Management Shell), dan
+          gebeurt er niets; anders wordt de lokale Exchange Management Shell geladen.
+
+        Met -Credential verbind je met een ander account dan waarmee je bent aangemeld. De
+        inloggegevens worden in deze PowerShell-sessie onthouden (alleen in het geheugen) en ook
+        gebruikt om logbestanden via \\server\C$ op te ruimen en bij opnieuw verbinden vanuit de
+        webinterface.
     .EXAMPLE
         Connect-DxExchange -Server ex01.contoso.local
+    .EXAMPLE
+        Connect-DxExchange -Server ex01.contoso.local -Credential contoso\beheerder
     #>
     [CmdletBinding()]
     param(
         [string]$Server,
 
-        [pscredential]$Credential,
+        [System.Management.Automation.Credential()]
+        [pscredential]$Credential = [pscredential]::Empty,
 
         [ValidateSet('Kerberos', 'Negotiate', 'Basic')]
         [string]$Authentication = 'Kerberos'
     )
 
-    if (Test-DxCommand -Name 'Get-ExchangeServer') {
-        Write-DxLog -Level Success -Message 'Exchange-cmdlets zijn al beschikbaar.'
-        return
+    $hasCredential = $Credential -and $Credential -ne [pscredential]::Empty
+    if ($hasCredential -and -not $Server) {
+        throw 'Geef -Server op: inloggegevens (-Credential) worden alleen gebruikt voor een remote verbinding.'
     }
 
     if ($Server) {
+        if ($script:DxSession) {
+            Write-DxLog -Message "Bestaande verbinding met $script:DxExchangeServer sluiten."
+            Remove-DxExchangeSession -Session $script:DxSession -Module $script:DxSessionModule
+            $script:DxSession = $null
+            $script:DxSessionModule = $null
+            $script:DxExchangeServer = $null
+        }
+
         $params = @{
             ConfigurationName = 'Microsoft.Exchange'
             ConnectionUri     = "http://$Server/PowerShell/"
             Authentication    = $Authentication
             ErrorAction       = 'Stop'
         }
-        if ($Credential) { $params['Credential'] = $Credential }
+        if ($hasCredential) { $params['Credential'] = $Credential }
 
-        Write-DxLog -Level Action -Message "Verbinden met Exchange op $Server ..."
-        $session = New-PSSession @params
-        Import-Module (Import-PSSession -Session $session -DisableNameChecking -AllowClobber) -Global -DisableNameChecking | Out-Null
+        $account = if ($hasCredential) { $Credential.UserName } else { "$env:USERDOMAIN\$env:USERNAME".TrimStart('\') }
+        Write-DxLog -Level Action -Message "Verbinden met Exchange op $Server als $account ($Authentication) ..."
+        try {
+            $connection = New-DxExchangeSession -SessionParameters $params
+        }
+        catch {
+            throw ("Verbinden met $Server mislukt: $($_.Exception.Message) " +
+                'Controleer de servernaam (gebruik bij Kerberos de volledige naam, bijv. ex01.contoso.local), ' +
+                'of poort 80 bereikbaar is en of het account Exchange-beheerder is.')
+        }
+
+        $script:DxSession = $connection.Session
+        $script:DxSessionModule = $connection.Module
+        $script:DxExchangeServer = $Server
+        $script:DxAuthentication = $Authentication
+        $script:DxCredential = if ($hasCredential) { $Credential } else { $null }
+    }
+    elseif (Test-DxCommand -Name 'Get-ExchangeServer') {
+        Write-DxLog -Level Success -Message 'Exchange-cmdlets zijn al beschikbaar.'
+        return
     }
     else {
         $remoteExchange = if ($env:ExchangeInstallPath) { Join-Path $env:ExchangeInstallPath 'bin\RemoteExchange.ps1' }
@@ -49,6 +84,8 @@ function Connect-DxExchange {
     }
 
     Assert-DxExchangeShell
-    Set-ADServerSettings -ViewEntireForest $true -ErrorAction SilentlyContinue
+    if (Test-DxCommand -Name 'Set-ADServerSettings') {
+        Set-ADServerSettings -ViewEntireForest $true -ErrorAction SilentlyContinue
+    }
     Write-DxLog -Level Success -Message 'Verbonden met Exchange.'
 }

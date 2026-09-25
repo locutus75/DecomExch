@@ -148,6 +148,8 @@ function Invoke-DxApiRoute {
                 organization = if ($connected) { $State['Organization'] } else { $null }
                 user         = $env:USERNAME
                 computer     = $env:COMPUTERNAME
+                exchangeServer = $script:DxExchangeServer
+                account      = if ($script:DxCredential) { $script:DxCredential.UserName } else { $null }
                 version      = "$($MyInvocation.MyCommand.Module.Version)"
                 outputPath   = $State['OutputPath']
                 logFile      = $script:DxLogFile
@@ -156,7 +158,15 @@ function Invoke-DxApiRoute {
 
         'POST /api/connect' {
             $server = "$(Get-DxBodyValue -Body $Body -Name 'server' -Default '')".Trim()
-            if ($server) { Connect-DxExchange -Server $server } else { Connect-DxExchange }
+            if ($server) {
+                # Inloggegevens van de start (-Credential) opnieuw gebruiken; het wachtwoord gaat nooit via de browser.
+                $params = @{ Server = $server; Authentication = $script:DxAuthentication }
+                if ($script:DxCredential) { $params['Credential'] = $script:DxCredential }
+                Connect-DxExchange @params
+            }
+            else {
+                Connect-DxExchange
+            }
             $State['Organization'] = $null
             $State['Inventory'] = $null
             return [ordered]@{ connected = (Test-DxCommand -Name 'Get-ExchangeServer') }
