@@ -4,8 +4,9 @@
     van een on-premises Exchange-server.
 
 .DESCRIPTION
-    Start zonder parameters een interactief menu. Met -Action kan een taak ook
-    zonder menu (bijv. gepland) worden uitgevoerd.
+    Start zonder parameters een interactief menu. Met -Action Web start de
+    webinterface in de browser. Met de overige acties kan een taak ook zonder
+    menu (bijv. gepland) worden uitgevoerd.
 
     Het menu start ALTIJD in simulatiemodus: er wordt niets gewijzigd of geexporteerd
     totdat je de simulatiemodus uitzet. Opruimacties vragen daarna nog om bevestiging.
@@ -15,7 +16,7 @@
     Outlook en kan ook op een werkstation zonder Exchange-cmdlets.
 
 .PARAMETER Action
-    Menu (standaard), Inventory, MailboxReport, PublicFolderReport, Readiness,
+    Menu (standaard), Web, Inventory, MailboxReport, PublicFolderReport, Readiness,
     ExportMailboxes, ExportPublicFolders, PstStatus,
     CleanLogs, CleanRequests, CleanDisconnectedMailboxes, CleanCertificates.
 
@@ -25,6 +26,9 @@
 
 .EXAMPLE
     .\DecomExch.ps1
+
+.EXAMPLE
+    .\DecomExch.ps1 -Action Web
 
 .EXAMPLE
     .\DecomExch.ps1 -Action Inventory -OutputPath D:\DecomExch
@@ -40,7 +44,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'Readiness',
+    [ValidateSet('Menu', 'Web', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'Readiness',
         'ExportMailboxes', 'ExportPublicFolders', 'PstStatus',
         'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates')]
     [string]$Action = 'Menu',
@@ -67,7 +71,14 @@ param(
 
     [string[]]$PublicFolder = @('\'),
 
-    [switch]$Execute
+    [switch]$Execute,
+
+    # Poort voor de webinterface (-Action Web).
+    [ValidateRange(1024, 65535)]
+    [int]$Port = 8765,
+
+    # Webinterface starten zonder automatisch de browser te openen.
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -225,6 +236,19 @@ $defaults = @{
     PstPath      = $PstPath
     IncludeArchive = [bool]$IncludeArchive
     PublicFolder = $PublicFolder
+}
+
+# --- Webinterface -------------------------------------------------------------------
+if ($Action -eq 'Web') {
+    try {
+        Initialize-Connection
+    }
+    catch {
+        Write-Host $_.Exception.Message -ForegroundColor Yellow
+        Write-Host 'De webinterface start zonder Exchange-verbinding; verbind via de knop rechtsboven.' -ForegroundColor Yellow
+    }
+    Start-DxWebUI -Port $Port -OutputPath $OutputPath -NoBrowser:$NoBrowser
+    return
 }
 
 # --- Niet-interactief --------------------------------------------------------------

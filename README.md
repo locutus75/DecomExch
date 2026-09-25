@@ -5,6 +5,35 @@ erover te **rapporteren**, mailboxen en public folders te **exporteren naar PST*
 op te **ruimen** en **veilig uit te faseren**. Werkt vanuit de Exchange Management Shell, met een
 interactief menu of volledig via parameters (voor geplande taken).
 
+## Webinterface
+
+```powershell
+.\DecomExch.ps1 -Action Web
+```
+
+Start een lokale webinterface in de browser met een dashboard, doorzoekbare en sorteerbare tabellen,
+de uitfaseringscontrole, PST-export en opruimacties. Alles wat het menu kan, kan ook de webinterface.
+
+![DecomExch webinterface](docs/webinterface.png)
+
+- **Dashboard** met kerncijfers en aandachtspunten (verlopen certificaten, inactieve mailboxen, open aanvragen).
+- **Mailboxen** en **public folders**: zoeken, filteren, sorteren, selecteren en direct doorsturen naar de PST-export.
+- **Uitfaseringscontrole** met een duidelijk oordeel per server en de oplossing per punt.
+- **PST-export** met voortgangsbalken per exportaanvraag.
+- **Opruimen**: altijd eerst simuleren; in LIVE-modus moet elke actie met `JA` worden bevestigd.
+- Elke tabel is te downloaden als CSV of op te slaan als HTML-rapport; licht en donker thema.
+
+Veiligheid van de webinterface:
+
+- De webserver luistert alleen op `http://localhost` (standaard poort 8765, aan te passen met `-Port`).
+- Elke sessie krijgt een geheim token in de link; zonder dat token worden API-verzoeken geweigerd.
+- De interface start altijd in **simulatiemodus**. De server weigert echte opruimacties zonder `JA`-bevestiging.
+- Geen externe bibliotheken of CDN's: werkt ook op servers zonder internettoegang.
+- Stoppen met Ctrl+C in de console of de knop **Afsluiten** in de interface.
+
+De webserver draait in de PowerShell-sessie en gebruikt de Exchange-verbinding daarvan; acties worden
+een voor een uitgevoerd. Grote inventarisaties kunnen enkele minuten duren.
+
 ## Wat kan het?
 
 **Onderzoek en rapportage** (alleen lezen, uitvoer als HTML-rapport + CSV)
@@ -99,6 +128,10 @@ daarom **Outlook**: er wordt een PST aan het Outlook-profiel gekoppeld, de gekoz
 # Interactief menu (in de Exchange Management Shell)
 .\DecomExch.ps1
 
+# Webinterface in de browser
+.\DecomExch.ps1 -Action Web
+.\DecomExch.ps1 -Action Web -Port 9000 -NoBrowser
+
 # Remote verbinden met een Exchange-server
 .\DecomExch.ps1 -ExchangeServer ex01.contoso.local
 
@@ -122,7 +155,7 @@ daarom **Outlook**: er wordt een PST aan het Outlook-profiel gekoppeld, de gekoz
 .\DecomExch.ps1 -Action CleanLogs -Server EX01 -OlderThanDays 30 -Execute
 ```
 
-Acties: `Inventory`, `MailboxReport`, `PublicFolderReport`, `Readiness`, `ExportMailboxes`, `ExportPublicFolders`,
+Acties: `Web`, `Inventory`, `MailboxReport`, `PublicFolderReport`, `Readiness`, `ExportMailboxes`, `ExportPublicFolders`,
 `PstStatus`, `CleanLogs`, `CleanRequests`, `CleanDisconnectedMailboxes`, `CleanCertificates`.
 
 De functies zijn ook los te gebruiken als module:
@@ -172,9 +205,10 @@ Invoke-Pester -Path .\tests
 ## Structuur
 
 ```
-DecomExch.ps1                 Menu en niet-interactieve acties
+DecomExch.ps1                 Menu, webinterface en niet-interactieve acties
 src/DecomExch/                PowerShell-module
+  Web/                        Webinterface (HTML, CSS, JavaScript; geen externe afhankelijkheden)
   Public/                     Get-DxInventory, Get-DxMailboxReport, Export-DxMailboxToPst, ...
-  Private/                    Hulpfuncties (logging, UNC-paden, ...)
+  Private/                    Hulpfuncties (logging, UNC-paden, API-routes van de webinterface, ...)
 tests/                        Pester-tests en Exchange-stubs
 ```

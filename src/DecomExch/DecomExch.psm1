@@ -1,6 +1,7 @@
 Set-StrictMode -Version 2.0
 
 $script:DxLogFile = $null
+$script:DxLogBuffer = New-Object System.Collections.Generic.List[object]
 
 foreach ($folder in 'Private', 'Public') {
     $path = Join-Path -Path $PSScriptRoot -ChildPath $folder

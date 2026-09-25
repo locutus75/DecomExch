@@ -33,3 +33,4 @@ function global:New-MailboxExportRequest { param($Mailbox, $FilePath, $Name, $Ba
 function global:Get-MailboxExportRequestStatistics { param($Identity, $ErrorAction) }
 function global:Get-PublicFolderStatistics { param($ResultSize, $ErrorAction) }
 function global:Get-MailPublicFolder { param($ResultSize, $ErrorAction) }
+function global:Get-OrganizationConfig { param($ErrorAction) }

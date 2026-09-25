@@ -1,6 +1,6 @@
 @{
     RootModule        = 'DecomExch.psm1'
-    ModuleVersion     = '1.1.0'
+    ModuleVersion     = '1.2.0'
     GUID              = '5b0f6f0e-8f5d-4a55-9d0e-3c1b7b7d2a11'
     Author            = 'DecomExch'
     Description       = 'Onderzoeken, rapporteren, exporteren naar PST, opruimen en uitfaseren van on-premises Exchange servers.'
@@ -21,6 +21,7 @@
         'Remove-DxExpiredCertificate'
         'Export-DxReport'
         'Set-DxLogFile'
+        'Start-DxWebUI'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
