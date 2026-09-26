@@ -4,7 +4,8 @@ function Start-DxWebUI {
         Start de webinterface van DecomExch in de browser.
     .DESCRIPTION
         Start een lokale webserver (alleen bereikbaar via http://localhost) en opent de
-        interface in de standaardbrowser. Elke sessie krijgt een eigen geheim token dat in
+        interface in de standaardbrowser. Is de poort bezet, dan wordt de volgende vrije poort
+        gebruikt (tot 10 poorten verder). Elke sessie krijgt een eigen geheim token dat in
         de link zit; andere websites of gebruikers kunnen de interface daardoor niet aansturen.
 
         De webserver draait in deze PowerShell-sessie en gebruikt de Exchange-verbinding
@@ -41,14 +42,9 @@ function Start-DxWebUI {
         Stop       = $false
     }
 
-    $listener = New-Object System.Net.HttpListener
-    $listener.Prefixes.Add("http://localhost:$Port/")
-    try {
-        $listener.Start()
-    }
-    catch {
-        throw "Kan de webinterface niet starten op poort ${Port}: $($_.Exception.Message). Kies een andere poort met -Port."
-    }
+    $opened = Open-DxHttpListener -Port $Port
+    $listener = $opened.Listener
+    $Port = $opened.Port
 
     $url = "http://localhost:$Port/?token=$($state.Token)"
     Write-DxLog -Level Success -Message 'Webinterface gestart.'
