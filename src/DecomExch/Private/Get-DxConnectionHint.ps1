@@ -16,19 +16,34 @@ function Get-DxConnectionHint {
         [bool]$HasCredential = $false
     )
 
+    # Domeinnaam voor de tips afleiden uit de volledige servernaam (ex01.contoso.local -> contoso.local).
+    $domain = if ($Server -match '^[^.]+\.(.+\..+)$') { $Matches[1] } else { '<domein>' }
+    $kerberosRoute = ("Werk vanaf een computer in het domein (of op de Exchange-server zelf), of zorg dat deze computer een " +
+        "domeincontroller kan bereiken: test met nltest /dsgetdc:$domain en Resolve-DnsName -Type SRV _kerberos._tcp.$domain " +
+        '(bijv. via de VPN of DNS van de organisatie).')
+
     if ($Message -match '0x80090311|domain isn.t available|No authority could be contacted') {
         return ('OPLOSSING: deze computer kan geen domeincontroller van het domein van het account bereiken, ' +
-            'en Kerberos heeft die nodig. Maak verbinding met het netwerk of de VPN van de organisatie en controleer ' +
-            'of de computer de DNS-servers van dat domein gebruikt (test: nltest /dsgetdc:<domein>). ' +
-            'Of start DecomExch op een computer in het domein, of op de Exchange-server zelf.')
+            "en Kerberos heeft die nodig. $kerberosRoute")
     }
     if ($Message -match 'implicit credentials|not joined to a domain') {
         return ('OPLOSSING: deze computer zit niet in het domein. Geef een beheeraccount op met ' +
             '-Credential <domein>\<gebruiker>; bij opnieuw verbinden in de webinterface worden die inloggegevens hergebruikt.')
     }
+    if ($Message -match 'bad request|\(400\)') {
+        if ($Authentication -ne 'Kerberos') {
+            return ("OPLOSSING: Exchange accepteert voor remote PowerShell standaard alleen Kerberos; $Authentication wordt " +
+                "geweigerd (HTTP 400). Verbind met Kerberos. $kerberosRoute")
+        }
+        return ('OPLOSSING: de server weigerde het verzoek (HTTP 400). Gebruik de volledige servernaam zoals die in DNS ' +
+            'en Active Directory staat (geen IP-adres of alias), zodat Kerberos het juiste serviceaccount (SPN) vindt.')
+    }
     if ($Message -match 'TrustedHosts') {
-        return ("OPLOSSING: voor $Authentication zonder Kerberos moet de server in TrustedHosts staan. Voer als beheerder uit: " +
-            "Set-Item WSMan:\localhost\Client\TrustedHosts -Value '$Server' -Concatenate -Force")
+        return ('OPLOSSING: zonder Kerberos moet de server in TrustedHosts staan. Controleer eerst de huidige waarde met ' +
+            "Get-Item WSMan:\localhost\Client\TrustedHosts. Staat daar '*', dan worden alle servers al vertrouwd. Is de waarde leeg, voer dan " +
+            "als beheerder uit: Set-Item WSMan:\localhost\Client\TrustedHosts -Value '$Server' -Force; staan er al andere servers, " +
+            'voeg dan -Concatenate toe. Let op: Exchange accepteert voor remote PowerShell standaard alleen Kerberos, dus ' +
+            "$Authentication kan daarna alsnog worden geweigerd.")
     }
     if ($Message -match 'Access is denied|Toegang geweigerd|401|logon failure|user name or password') {
         return ('OPLOSSING: controleer gebruikersnaam en wachtwoord, en of het account Exchange-beheerder is en remote PowerShell mag ' +
