@@ -134,6 +134,34 @@ Describe 'DecomExch remote verbinding' {
                 Get-DxConnectionHint -Message 'iets anders' | Should -Match 'poort 80'
             }
         }
+
+        It 'legt uit dat Exchange Negotiate weigert (HTTP 400)' {
+            InModuleScope DecomExch {
+                $message = 'Connecting to remote server fmgexc01.rotterdam.local failed with the following error message : The WinRM client received an HTTP bad request status (400), but the remote service did not include any other information about the cause of the failure.'
+                $hint = Get-DxConnectionHint -Message $message -Server 'fmgexc01.rotterdam.local' -Authentication Negotiate
+                $hint | Should -Match 'alleen Kerberos'
+                $hint | Should -Match 'nltest /dsgetdc:rotterdam\.local'
+                Get-DxConnectionHint -Message $message -Server 'fmgexc01.rotterdam.local' -Authentication Kerberos | Should -Match 'SPN'
+            }
+        }
+
+        It 'noemt het juiste domein bij een onbereikbare domeincontroller' {
+            InModuleScope DecomExch {
+                $hint = Get-DxConnectionHint -Message 'errorcode 0x80090311' -Server 'fmgexc01.rotterdam.local'
+                $hint | Should -Match 'nltest /dsgetdc:rotterdam\.local'
+                $hint | Should -Match '_kerberos\._tcp\.rotterdam\.local'
+                Get-DxConnectionHint -Message 'errorcode 0x80090311' -Server 'ex01' | Should -Match 'nltest /dsgetdc:<domein>'
+            }
+        }
+
+        It 'laat bij TrustedHosts eerst de huidige waarde controleren' {
+            InModuleScope DecomExch {
+                $hint = Get-DxConnectionHint -Message 'add the destination computer to the WinRM TrustedHosts configuration setting' -Server 'ex01' -Authentication Negotiate
+                $hint | Should -Match 'Get-Item WSMan'
+                $hint | Should -Match "'\*'"
+                $hint | Should -Match 'alleen Kerberos'
+            }
+        }
     }
 
     Context 'Webinterface' {

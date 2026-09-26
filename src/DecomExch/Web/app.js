@@ -1055,7 +1055,7 @@
       h('div', { class: 'field' }, h('label', { text: 'Exchange-server (leeg = lokale Exchange Management Shell)' }), server,
         h('span', { class: 'hint', text: `Verbinding via http://<server>/PowerShell. Gebruik de volledige servernaam. ${accountHint}` })),
       h('div', { class: 'field' }, h('label', { text: 'Aanmeldmethode' }), auth,
-        h('span', { class: 'hint', text: 'Kerberos is de standaard en heeft een bereikbare domeincontroller nodig. Negotiate (NTLM) vereist dat de server in TrustedHosts staat; Basic moet op de server zijn ingeschakeld.' })));
+        h('span', { class: 'hint', text: 'Gebruik Kerberos: dat is wat Exchange standaard accepteert, en het heeft een bereikbare domeincontroller nodig. Negotiate (NTLM) en Basic worden door Exchange standaard geweigerd (HTTP 400), tenzij ze op de server zijn ingeschakeld.' })));
     const current = s.connected
       ? `Nu verbonden${s.organization ? ' met ' + s.organization : ''}${s.exchangeServer ? ' via ' + s.exchangeServer : ''}${s.account ? ' als ' + s.account : ''}.`
       : 'Maak verbinding om de organisatie te onderzoeken.';

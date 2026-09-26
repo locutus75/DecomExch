@@ -50,8 +50,8 @@ met de server; de Exchange-beheertools zijn daarvoor niet nodig.
 
 - Werkt ook met het menu en de niet-interactieve acties (`-Action Inventory`, `CleanLogs`, ...).
 - Gebruik de volledige servernaam (FQDN); de verbinding loopt via `http://<server>/PowerShell`
-  (poort 80) met Kerberos. Andere methoden: `-Authentication Negotiate` of `Basic` (alleen als dat op
-  de PowerShell-virtuele map is ingeschakeld).
+  (poort 80) met Kerberos. Exchange accepteert standaard alleen Kerberos; `-Authentication Negotiate`
+  of `Basic` werkt alleen als dat op de server is ingeschakeld.
 - Vanaf een laptop buiten het domein kan Kerberos met `-Credential` werken als de laptop de
   domeincontrollers en de Exchange-server op naam kan bereiken; lukt dat niet, gebruik dan een
   laptop of beheerserver in het domein.
@@ -67,7 +67,8 @@ met de server; de Exchange-beheertools zijn daarvoor niet nodig.
 |---|---|
 | `0x80090311` / *your domain isn't available* | De laptop kan geen domeincontroller van het domein van het account bereiken; Kerberos heeft die nodig. Maak verbinding met het netwerk of de VPN van de organisatie en controleer DNS (`nltest /dsgetdc:<domein>`). Of start DecomExch op een computer in het domein of op de Exchange-server zelf. |
 | *Kerberos ... implicit credentials ... not joined to a domain* | De laptop zit niet in het domein: geef een account op met `-Credential <domein>\<gebruiker>`. |
-| *TrustedHosts* | Bij `Negotiate` of `Basic` moet de server in TrustedHosts staan: als beheerder `Set-Item WSMan:\localhost\Client\TrustedHosts -Value <server> -Concatenate -Force`. Of Exchange die methoden accepteert, hangt af van de configuratie van de PowerShell-virtuele map. |
+| *HTTP bad request status (400)* met `Negotiate` of `Basic` | Exchange accepteert voor remote PowerShell standaard alleen Kerberos. Verbind met Kerberos (zie de eerste regel). |
+| *TrustedHosts* | Alleen nodig zonder Kerberos. Controleer eerst `Get-Item WSMan:\localhost\Client\TrustedHosts`: staat daar `*`, dan is het al goed; is het leeg, gebruik `Set-Item WSMan:\localhost\Client\TrustedHosts -Value <server> -Force` (met `-Concatenate` als er al andere servers staan). |
 | *Access is denied* | Verkeerd wachtwoord, of het account is geen Exchange-beheerder of mag geen remote PowerShell gebruiken. |
 
 In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de inloggegevens van
