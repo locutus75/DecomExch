@@ -26,6 +26,8 @@ de uitfaseringscontrole, PST-export en opruimacties. Alles wat het menu kan, kan
 Veiligheid van de webinterface:
 
 - De webserver luistert alleen op `http://localhost` (standaard poort 8765, aan te passen met `-Port`).
+  Is de poort bezet, bijvoorbeeld door een webinterface die nog in een ander venster draait, dan wordt
+  automatisch de volgende vrije poort gebruikt; de console toont de juiste link.
 - Elke sessie krijgt een geheim token in de link; zonder dat token worden API-verzoeken geweigerd.
 - Inloggegevens (`-Credential`) blijven in PowerShell; de webinterface toont alleen de accountnaam.
 - De interface start altijd in **simulatiemodus**. De server weigert echte opruimacties zonder `JA`-bevestiging.

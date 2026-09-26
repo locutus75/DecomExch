@@ -49,6 +49,45 @@ Describe 'DecomExch webinterface' {
         }
     }
 
+    Context 'Open-DxHttpListener' {
+        It 'kiest de volgende poort als de gevraagde poort bezet is' {
+            InModuleScope DecomExch {
+                $port = Get-Random -Minimum 20000 -Maximum 40000
+                $blocker = New-Object System.Net.HttpListener
+                $blocker.Prefixes.Add("http://localhost:$port/")
+                $blocker.Start()
+                $opened = $null
+                try {
+                    $opened = Open-DxHttpListener -Port $port -WarningAction SilentlyContinue
+                    $opened.Port | Should -Be ($port + 1)
+                    $opened.Listener.IsListening | Should -BeTrue
+                }
+                finally {
+                    if ($opened) { $opened.Listener.Close() }
+                    $blocker.Close()
+                }
+            }
+        }
+
+        It 'geeft een duidelijke fout als alle poorten bezet zijn' {
+            InModuleScope DecomExch {
+                $port = Get-Random -Minimum 40001 -Maximum 60000
+                $blocker = New-Object System.Net.HttpListener
+                $blocker.Prefixes.Add("http://localhost:$port/")
+                $blocker.Start()
+                try {
+                    $message = $null
+                    try { Open-DxHttpListener -Port $port -MaxAttempts 1 } catch { $message = $_.Exception.Message }
+                    $message | Should -Match "poorten $port t/m $port"
+                    $message | Should -Match 'andere DecomExch-vensters'
+                }
+                finally {
+                    $blocker.Close()
+                }
+            }
+        }
+    }
+
     Context 'Get-DxOverview' {
         It 'berekent de kerncijfers uit een inventarisatie' {
             InModuleScope DecomExch {
