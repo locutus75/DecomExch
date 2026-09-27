@@ -14,14 +14,14 @@ Describe 'DecomExch' {
         It 'exporteert alle publieke functies' {
             $exported = (Get-Module DecomExch).ExportedFunctions.Keys
             foreach ($name in 'Get-DxInventory', 'Test-DxDecomReadiness', 'Clear-DxExchangeLog', 'Remove-DxStaleRequest',
-                'Remove-DxDisconnectedMailbox', 'Remove-DxExpiredCertificate', 'Export-DxReport') {
+                'Remove-DxDisconnectedMailbox', 'Remove-DxExpiredCertificate', 'Export-DxReport', 'Get-DxHybridReport', 'Remove-DxHybridConfiguration') {
                 $exported | Should -Contain $name
             }
         }
 
         It 'alle verwijder- en exportfuncties ondersteunen -WhatIf' {
             foreach ($name in 'Clear-DxExchangeLog', 'Remove-DxStaleRequest', 'Remove-DxDisconnectedMailbox', 'Remove-DxExpiredCertificate',
-                'Export-DxMailboxToPst', 'Export-DxPublicFolderToPst') {
+                'Export-DxMailboxToPst', 'Export-DxPublicFolderToPst', 'Remove-DxHybridConfiguration') {
                 (Get-Command $name).Parameters.ContainsKey('WhatIf') | Should -BeTrue
             }
         }

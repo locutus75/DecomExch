@@ -21,7 +21,7 @@ function global:Remove-MailboxImportRequest { param($Identity, [switch]$Confirm,
 function global:Get-MailboxRestoreRequest { param($ErrorAction) }
 function global:Remove-MailboxRestoreRequest { param($Identity, [switch]$Confirm, $ErrorAction) }
 function global:Get-SendConnector { param($ErrorAction) }
-function global:Get-ReceiveConnector { param($Server, $ErrorAction) }
+function global:Get-ReceiveConnector { param($Identity, $Server, $ErrorAction) }
 function global:Get-DatabaseAvailabilityGroup { param($ErrorAction) }
 function global:Get-EdgeSubscription { param($ErrorAction) }
 function global:Get-ClientAccessService { param($Identity, $ErrorAction) }
@@ -39,3 +39,26 @@ function global:Get-MessageTrackingLog { param($Server, $Start, $End, $EventId, 
 function global:Get-AcceptedDomain { param($ErrorAction) }
 function global:Get-FrontendTransportService { param($Identity, $ErrorAction) }
 function global:Get-TransportService { param($Identity, $ErrorAction) }
+
+# Hybride koppeling
+function global:Get-OrganizationRelationship { param($ErrorAction) }
+function global:Remove-OrganizationRelationship { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-IntraOrganizationConnector { param($ErrorAction) }
+function global:Remove-IntraOrganizationConnector { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Remove-SendConnector { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-RemoteDomain { param($ErrorAction) }
+function global:Remove-RemoteDomain { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Set-ReceiveConnector { param($Identity, $TlsDomainCapabilities, [switch]$Confirm, $ErrorAction) }
+function global:Get-FederatedOrganizationIdentifier { param($ErrorAction) }
+function global:Set-FederatedOrganizationIdentifier { param($Enabled, $DelegationFederationTrust, [switch]$Confirm, $ErrorAction) }
+function global:Get-FederationTrust { param($ErrorAction) }
+function global:Remove-FederationTrust { param($Identity, [switch]$Confirm, $ErrorAction) }
+function global:Get-AuthServer { param($ErrorAction) }
+function global:Set-AuthServer { param($Identity, $Enabled, [switch]$Confirm, $ErrorAction) }
+function global:Get-PartnerApplication { param($ErrorAction) }
+function global:Set-PartnerApplication { param($Identity, $Enabled, [switch]$Confirm, $ErrorAction) }
+function global:Set-ClientAccessService { param($Identity, $AutoDiscoverServiceInternalUri, [switch]$Confirm, $ErrorAction) }
+function global:Remove-HybridConfiguration { param([switch]$Confirm, $ErrorAction) }
+if (-not (Get-Command -Name Resolve-DnsName -ErrorAction SilentlyContinue)) {
+    function global:Resolve-DnsName { param($Name, $Type, [switch]$DnsOnly, $ErrorAction) }
+}

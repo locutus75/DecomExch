@@ -87,23 +87,25 @@ In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de in
 | 3 | **Public folder-overzicht**: pad, aantal items, grootte, laatste wijziging en mail-enabled adres. |
 | 4 | **Relaygebruik**: wie verstuurt nog mail via de server, hoe vaak, en hoe (aanmelding, TLS, connector, interne of externe ontvangers). Zie [Relaygebruik](#relaygebruik). |
 | 5 | **Uitfaseringscontrole** per server, met per punt *OK / Info / Waarschuwing / Blokkerend* en de oplossing. |
+| 6 | **Hybride koppeling** met Exchange Online in kaart brengen: onderdelen, voorwaarden (mailboxen, migraties, MX, Autodiscover) en de handmatige stappen. Zie [Hybride koppeling opruimen](#hybride-koppeling-opruimen). |
 
 **Exporteren naar PST**
 
 | # | Onderdeel |
 |---|-----------|
-| 6 | **Mailboxen exporteren**: alle mailboxen, per database of een selectie, optioneel inclusief online archief (`<alias>.pst` en `<alias>_Archief.pst`). |
-| 7 | **Public folders exporteren** (met submappen) naar een PST, via Outlook. |
-| 8 | **Status van PST-exports** met voortgang per aanvraag. |
+| 7 | **Mailboxen exporteren**: alle mailboxen, per database of een selectie, optioneel inclusief online archief (`<alias>.pst` en `<alias>_Archief.pst`). |
+| 8 | **Public folders exporteren** (met submappen) naar een PST, via Outlook. |
+| 9 | **Status van PST-exports** met voortgang per aanvraag. |
 
 **Opruimen** (wijzigt iets, altijd eerst simuleren)
 
 | # | Onderdeel |
 |---|-----------|
-| 9 | **Logbestanden**: Exchange `Logging`, Search `ETLTraces`/`Logs` en IIS-logs ouder dan N dagen. Transactielogs en databasemappen worden altijd overgeslagen. |
-| 10 | **Afgeronde aanvragen**: move-, export-, import- en restore-aanvragen en migratiebatches. Lopende aanvragen worden nooit aangeraakt. |
-| 11 | **Losgekoppelde mailboxen** (Disabled/SoftDeleted) definitief verwijderen (onomkeerbaar). |
-| 12 | **Verlopen certificaten**. Gekoppelde certificaten en het OAuth-certificaat worden overgeslagen. |
+| 10 | **Logbestanden**: Exchange `Logging`, Search `ETLTraces`/`Logs` en IIS-logs ouder dan N dagen. Transactielogs en databasemappen worden altijd overgeslagen. |
+| 11 | **Afgeronde aanvragen**: move-, export-, import- en restore-aanvragen en migratiebatches. Lopende aanvragen worden nooit aangeraakt. |
+| 12 | **Losgekoppelde mailboxen** (Disabled/SoftDeleted) definitief verwijderen (onomkeerbaar). |
+| 13 | **Verlopen certificaten**. Gekoppelde certificaten en het OAuth-certificaat worden overgeslagen. |
+| 14 | **Hybride koppeling opruimen** aan de on-premises kant, met back-up vooraf. |
 
 ### Controles bij uitfasering
 
@@ -126,6 +128,43 @@ In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de in
 - Bij gebruik via parameters wordt alleen echt geexporteerd of gewijzigd met `-Execute`.
 - Alle functies die iets verwijderen of exporteren ondersteunen `-WhatIf` en `-Confirm`.
 - Elke sessie schrijft een logbestand naar `Output\Logs`.
+
+## Hybride koppeling opruimen
+
+Staan alle mailboxen in Exchange Online, dan kan de koppeling die de Hybrid Configuration Wizard (HCW)
+heeft gemaakt weg. DecomExch zoekt de onderdelen on-premises op en ruimt ze in een veilige volgorde op
+(menu 6 en 14, webpagina **Hybride koppeling**, of `Get-DxHybridReport` / `Remove-DxHybridConfiguration`):
+
+| Onderdeel | Actie |
+|-----------|-------|
+| IntraOrganizationConnector (`HybridIOC - ...`) | verwijderen |
+| Organization relationship met Exchange Online (`On-premises to O365 - ...`) | verwijderen |
+| Send connector naar Exchange Online (`Outbound to Office 365 - ...`) | verwijderen; een connector voor *alle* mail via Exchange Online is optioneel |
+| Remote domain `Hybrid Domain - tenant.mail.onmicrosoft.com` | verwijderen |
+| TLS-instelling `AcceptCloudServicesMail` op receive connectors | weghalen (certificaat blijft) |
+| Federated organization identifier en federation trust | uitschakelen / verwijderen; optioneel als een andere organisatie de federatie nog gebruikt |
+| OAuth: auth servers (ACS/EvoSts) en partner application *Exchange Online* | uitschakelen (terug te draaien) |
+| Autodiscover SCP | optioneel leegmaken |
+| Object `HybridConfiguration` | verwijderen |
+| Accepted domain `tenant.mail.onmicrosoft.com` | **blijft staan** (remote mailboxen en adresbeleid) |
+
+Veiligheid:
+
+- Eerst simuleren; bij een echte uitvoering komt er eerst een back-up (`Export-Clixml` + tekst) in `Output\Backup`.
+- Zijn er nog mailboxen of lopende migraties on-premises, dan stopt het opruimen (tenzij `-Force` /
+  *Toch uitvoeren* is gekozen): zonder koppeling werken mailflow en free/busy tussen beide kanten niet meer.
+- MX en Autodiscover worden gecontroleerd (vanaf de computer waar DecomExch draait).
+
+Daarna handmatig, buiten de on-premises organisatie (het rapport geeft de opdrachten): DNS (MX,
+Autodiscover, SPF), in Exchange Online de connectors `Inbound from ...`/`Outbound to ...`, de organization
+relationship `O365 to On-premises - ...`, de `HybridIOC` en migratie-endpoints, en eventueel de Hybrid Agent.
+Laat Entra Connect gebruikers synchroniseren en beheer ontvangers met de Exchange Management Tools.
+
+```powershell
+.\DecomExch.ps1 -Action HybridReport
+.\DecomExch.ps1 -Action CleanHybrid            # simulatie
+.\DecomExch.ps1 -Action CleanHybrid -Execute   # echt, met back-up
+```
 
 ## Relaygebruik
 
@@ -244,8 +283,8 @@ daarom **Outlook**: er wordt een PST aan het Outlook-profiel gekoppeld, de gekoz
 .\DecomExch.ps1 -Action CleanLogs -Server EX01 -OlderThanDays 30 -Execute
 ```
 
-Acties: `Web`, `Inventory`, `MailboxReport`, `RelayReport`, `PublicFolderReport`, `Readiness`, `ExportMailboxes`, `ExportPublicFolders`,
-`PstStatus`, `CleanLogs`, `CleanRequests`, `CleanDisconnectedMailboxes`, `CleanCertificates`.
+Acties: `Web`, `Inventory`, `MailboxReport`, `RelayReport`, `PublicFolderReport`, `Readiness`, `HybridReport`, `ExportMailboxes`, `ExportPublicFolders`,
+`PstStatus`, `CleanLogs`, `CleanRequests`, `CleanDisconnectedMailboxes`, `CleanCertificates`, `CleanHybrid`.
 
 De functies zijn ook los te gebruiken als module:
 
@@ -275,6 +314,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\DecomExch\DecomExch.p
 4. Blokkerende punten oplossen: mailboxen/systeemmailboxen verplaatsen, server uit de DAG halen,
    send connectors aanpassen, relay-klanten omzetten, Autodiscover SCP leegmaken.
 5. Opruimen: afgeronde aanvragen, losgekoppelde mailboxen, verlopen certificaten, lege databases.
+   Staan alle mailboxen in Exchange Online: **hybride koppeling opruimen** (en de stappen in Exchange Online).
 6. DNS (MX, Autodiscover, SPF), firewall/NAT en load balancer bijwerken.
 7. Server enkele dagen **uitgeschakeld** laten staan en logs controleren op resterend verkeer.
 8. Exchange verwijderen via *Programs and Features* of `Setup.exe /mode:Uninstall

@@ -368,6 +368,33 @@ function Invoke-DxApiRoute {
             return ,@(Remove-DxExpiredCertificate @params | ConvertTo-DxJsonSafe)
         }
 
+        'GET /api/hybrid' {
+            $r = Get-DxHybridReport
+            return [ordered]@{
+                present    = $r.Aanwezig
+                blockers   = @($r.Controles | Where-Object Status -eq 'Blokkerend').Count
+                warnings   = @($r.Controles | Where-Object Status -eq 'Waarschuwing').Count
+                components = @($r.Onderdelen | ConvertTo-DxJsonSafe)
+                checks     = @($r.Controles | ConvertTo-DxJsonSafe)
+                manual     = @($r.Handmatig | ConvertTo-DxJsonSafe)
+            }
+        }
+
+        'POST /api/clean/hybrid' {
+            Assert-DxConfirmed -Simulate $simulate -Body $Body
+            # Niet splitsen op komma's: namen van onderdelen kunnen die bevatten.
+            $ids = @(@(Get-DxBodyValue -Body $Body -Name 'ids' -Default @()) | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+            if ($ids.Count -eq 0) { throw (New-Object System.ArgumentException 'Kies minimaal een onderdeel.') }
+            $params = @{
+                Id         = $ids
+                BackupPath = (Join-Path -Path $State['OutputPath'] -ChildPath 'Backup')
+                Force      = [bool](Get-DxBodyValue -Body $Body -Name 'force' -Default $false)
+                WhatIf     = $simulate
+                Confirm    = $false
+            }
+            return ,@(Remove-DxHybridConfiguration @params | ConvertTo-DxJsonSafe)
+        }
+
         'GET /api/log' {
             # Nieuwste eerst, maximaal 300 regels.
             $lines = $script:DxLogBuffer.ToArray()
