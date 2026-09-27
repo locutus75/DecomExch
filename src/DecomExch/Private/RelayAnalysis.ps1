@@ -264,6 +264,7 @@ function Invoke-DxRelayAnalysis {
     $exchangeAddress = @(Get-DxExchangeServerAddress)
 
     # --- SMTP-protocollogs ------------------------------------------------------------------
+    $skipped = New-Object System.Collections.Generic.List[string]
     if ($Source -eq 'Path') {
         $files = @(foreach ($p in $Path) {
             if (Test-Path -LiteralPath $p -PathType Leaf) { Get-Item -LiteralPath $p }
@@ -273,7 +274,7 @@ function Invoke-DxRelayAnalysis {
         $files = @($files | Where-Object { $_.LastWriteTime -ge $start })
         $fileCount = $files.Count
         if ($files.Count -gt 0) {
-            $sessions = @(Read-DxSmtpReceiveLog -File $files -Start $start -End $end -ServerLabel 'Map')
+            $sessions = @(Read-DxSmtpReceiveLog -File $files -Start $start -End $end -ServerLabel 'Map' -SkippedFile $skipped)
             foreach ($r in @($sessions | ConvertTo-DxRelayRecord -Kind Session)) { $records.Add($r) }
             if ($sessions.Count -eq 0) { $notes.Add('De logbestanden bevatten geen SMTP Receive-sessies in deze periode. Gebruik de RECV*.log-bestanden uit de map ProtocolLog\SmtpReceive.') }
         }
@@ -295,7 +296,7 @@ function Invoke-DxRelayAnalysis {
                     continue
                 }
                 $fileCount += $files.Count
-                $sessions = @(Read-DxSmtpReceiveLog -File $files -Start $start -End $end -ServerLabel $srv)
+                $sessions = @(Read-DxSmtpReceiveLog -File $files -Start $start -End $end -ServerLabel $srv -SkippedFile $skipped)
                 foreach ($r in @($sessions | ConvertTo-DxRelayRecord -Kind Session)) { $records.Add($r) }
             }
             finally {
@@ -309,6 +310,9 @@ function Invoke-DxRelayAnalysis {
         else {
             $usedSource = 'ProtocolLog'
         }
+    }
+    if ($skipped.Count -gt 0) {
+        $notes.Add(("{0} logbestand(en) konden niet worden gelezen en zijn overgeslagen: {1}." -f $skipped.Count, (Join-DxTop -Value $skipped.ToArray() -Top 5)))
     }
 
     # --- Message tracking --------------------------------------------------------------------

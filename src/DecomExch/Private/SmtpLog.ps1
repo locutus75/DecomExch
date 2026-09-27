@@ -92,7 +92,10 @@ function Read-DxSmtpReceiveLog {
 
         [datetime]$End = [datetime]::MaxValue,
 
-        [string]$ServerLabel = ''
+        [string]$ServerLabel = '',
+
+        # Optioneel: hierin komen de namen van bestanden die niet (volledig) gelezen konden worden.
+        [System.Collections.Generic.List[string]]$SkippedFile
     )
 
     $expected = 'date-time,connector-id,session-id,sequence-number,local-endpoint,remote-endpoint,event,data,context'
@@ -105,7 +108,21 @@ function Read-DxSmtpReceiveLog {
 
         $fast = $true
         $index = $null
-        foreach ($line in [System.IO.File]::ReadLines($f.FullName)) {
+        # Exchange houdt het actieve logbestand open om te schrijven; daarom openen met FileShare
+        # ReadWrite/Delete (File.ReadLines staat alleen gedeeld lezen toe en faalt dan).
+        $reader = $null
+        try {
+            $stream = New-Object System.IO.FileStream($f.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+            $reader = New-Object System.IO.StreamReader($stream)
+        }
+        catch {
+            $msg = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+            Write-Warning "Logbestand '$($f.FullName)' overgeslagen: $msg"
+            if ($null -ne $SkippedFile) { $SkippedFile.Add($f.Name) }
+            continue
+        }
+        try {
+        while ($null -ne ($line = $reader.ReadLine())) {
             if ($line.Length -eq 0) { continue }
             if ($line[0] -eq '#') {
                 if ($line.StartsWith('#Fields:')) {
@@ -204,6 +221,14 @@ function Read-DxSmtpReceiveLog {
                     $s.End = $t.ToLocalTime()
                 }
             }
+        }
+        }
+        catch {
+            Write-Warning "Logbestand '$($f.FullName)' niet volledig gelezen: $($_.Exception.Message)"
+            if ($null -ne $SkippedFile) { $SkippedFile.Add($f.Name) }
+        }
+        finally {
+            $reader.Dispose()
         }
     }
     Write-Progress -Activity 'SMTP-protocollogs lezen' -Completed

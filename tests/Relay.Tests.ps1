@@ -92,6 +92,35 @@ Describe 'DecomExch relaygebruik' {
                 @(Read-DxSmtpReceiveLog -File $files -Start ([datetime]'2026-09-10')).Count | Should -Be 6
             }
         }
+
+        It 'leest een logbestand dat Exchange nog open heeft om te schrijven' {
+            $global:DxLockedCopy = Join-Path ([System.IO.Path]::GetTempPath()) ("RECV-locked-{0}.log" -f [guid]::NewGuid())
+            Copy-Item -LiteralPath (Join-Path $global:DxFixtureLogs 'RECV2026092010-1.log') -Destination $global:DxLockedCopy
+            # Zoals de Transport-service: open voor schrijven, anderen mogen lezen en schrijven.
+            $writer = New-Object System.IO.FileStream($global:DxLockedCopy, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+            try {
+                InModuleScope DecomExch {
+                    $sessions = @(Read-DxSmtpReceiveLog -File (Get-Item -LiteralPath $global:DxLockedCopy))
+                    $sessions.Count | Should -Be 6
+                }
+            }
+            finally {
+                $writer.Dispose()
+                Remove-Item -LiteralPath $global:DxLockedCopy -Force -ErrorAction SilentlyContinue
+                Remove-Variable -Name DxLockedCopy -Scope Global -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'slaat een onleesbaar bestand over en leest de rest' {
+            InModuleScope DecomExch {
+                $missing = New-Object System.IO.FileInfo (Join-Path $global:DxFixtureLogs 'RECV-bestaat-niet.log')
+                $good = Get-Item -LiteralPath (Join-Path $global:DxFixtureLogs 'RECV2026092010-1.log')
+                $skipped = New-Object System.Collections.Generic.List[string]
+                $sessions = @(Read-DxSmtpReceiveLog -File @($missing, $good) -SkippedFile $skipped -WarningAction SilentlyContinue)
+                $sessions.Count | Should -Be 6
+                @($skipped) -join ',' | Should -Be 'RECV-bestaat-niet.log'
+            }
+        }
     }
 
     Context 'Get-DxRelayUsage uit een map met logbestanden' {
