@@ -139,7 +139,8 @@ function Test-DxDecomReadiness {
     if ($customReceive.Count -gt 0) {
         & $add (New-DxCheckResult -Check 'Eigen receive connectors' -Status Waarschuwing `
             -Details ("Niet-standaard connectors: {0}" -f (($customReceive | ForEach-Object { $_.Name }) -join ', ')) `
-            -Oplossing 'Controleer welke applicaties, scanners of printers via deze server relayen en verplaats ze (bijv. naar een andere server of Exchange Online / SMTP-relay).')
+            -Oplossing ('Controleer welke applicaties, scanners of printers via deze server relayen (Relaygebruik / Get-DxRelayUsage) ' +
+                'en verplaats ze (bijv. naar een andere server of Exchange Online / SMTP-relay).'))
     }
     else {
         & $add (New-DxCheckResult -Check 'Eigen receive connectors' -Status OK -Details 'Alleen standaardconnectors.')

@@ -35,3 +35,7 @@ function global:Get-PublicFolderStatistics { param($ResultSize, $ErrorAction) }
 function global:Get-MailPublicFolder { param($ResultSize, $ErrorAction) }
 function global:Get-OrganizationConfig { param($ErrorAction) }
 function global:Set-ADServerSettings { param($ViewEntireForest, $ErrorAction) }
+function global:Get-MessageTrackingLog { param($Server, $Start, $End, $EventId, $ResultSize, $ErrorAction) }
+function global:Get-AcceptedDomain { param($ErrorAction) }
+function global:Get-FrontendTransportService { param($Identity, $ErrorAction) }
+function global:Get-TransportService { param($Identity, $ErrorAction) }

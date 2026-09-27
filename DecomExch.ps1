@@ -16,7 +16,7 @@
     Outlook en kan ook op een werkstation zonder Exchange-cmdlets.
 
 .PARAMETER Action
-    Menu (standaard), Web, Inventory, MailboxReport, PublicFolderReport, Readiness,
+    Menu (standaard), Web, Inventory, MailboxReport, PublicFolderReport, RelayReport, Readiness,
     ExportMailboxes, ExportPublicFolders, PstStatus,
     CleanLogs, CleanRequests, CleanDisconnectedMailboxes, CleanCertificates.
 
@@ -46,10 +46,20 @@
 
 .EXAMPLE
     .\DecomExch.ps1 -Action CleanLogs -Server EX01 -OlderThanDays 30 -Execute
+
+.EXAMPLE
+    .\DecomExch.ps1 -Action RelayReport -Days 14
+
+    Wie gebruikt de server(s) nog als SMTP-relay? (SMTP-protocollogs of message tracking)
+
+.EXAMPLE
+    .\DecomExch.ps1 -Action RelayReport -LogPath D:\Logs\SmtpReceive -Domain contoso.nl -Days 0
+
+    Analyseert gekopieerde RECV*.log-bestanden, zonder Exchange-verbinding.
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu', 'Web', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'Readiness',
+    [ValidateSet('Menu', 'Web', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'RelayReport', 'Readiness',
         'ExportMailboxes', 'ExportPublicFolders', 'PstStatus',
         'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates')]
     [string]$Action = 'Menu',
@@ -93,7 +103,21 @@ param(
     [int]$Port = 8765,
 
     # Webinterface starten zonder automatisch de browser te openen.
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+
+    # Relaygebruik (-Action RelayReport): aantal dagen terug, 0 = alles in de logs.
+    [ValidateRange(0, 365)]
+    [int]$Days = 7,
+
+    # Relaygebruik: bron van de gegevens.
+    [ValidateSet('Auto', 'ProtocolLog', 'MessageTracking', 'Path')]
+    [string]$RelaySource = 'Auto',
+
+    # Relaygebruik: map(pen) met gekopieerde RECV*.log-bestanden (geen Exchange-verbinding nodig).
+    [string[]]$LogPath,
+
+    # Relaygebruik: eigen domeinen voor intern/extern (standaard de accepted domains).
+    [string[]]$Domain
 )
 
 $ErrorActionPreference = 'Stop'
@@ -201,6 +225,26 @@ function Invoke-Task {
             $report = $rows | Export-DxReport -Path $OutputPath -Title 'Public folders'
             Write-Host "Rapport: $report" -ForegroundColor Green
         }
+        'RelayReport' {
+            $params = @{ Days = $Options.RelayDays; Source = $Options.RelaySource; Report = $true }
+            if ($Options.LogPath) { $params['Path'] = $Options.LogPath }
+            if ($Options.Domain) { $params['Domain'] = $Options.Domain }
+            $r = Get-DxRelayUsage @params
+            Write-Host ("Bron: {0} - {1} client(s)." -f $r.Bron, @($r.Clients).Count) -ForegroundColor Cyan
+            foreach ($note in $r.Opmerkingen) { Write-Host " - $note" -ForegroundColor Yellow }
+            Show-Result -Result @($r.Clients | Select-Object -First 20) -Empty 'Geen SMTP-verkeer van clients gevonden.' `
+                -Property Client, Naam, Type, Berichten, Aanmelding, TLS, ExterneOntvangers, Afzenders, LaatsteKeer
+            $sections = [ordered]@{
+                'Clients'           = @($r.Clients)
+                'Berichten per dag' = @($r.PerDag)
+                'Aandachtspunten'   = @($r.Opmerkingen | ForEach-Object { [pscustomobject]@{ Aandachtspunt = $_ } })
+            }
+            if ($r.Bron -ne 'Map met logbestanden' -and (Get-Command -Name Get-ReceiveConnector -ErrorAction SilentlyContinue)) {
+                $sections['Receive connectors'] = @(Get-DxReceiveConnectorReport)
+            }
+            $report = $sections | Export-DxReport -Path $OutputPath -Title 'Relaygebruik'
+            Write-Host "Volledig rapport: $report" -ForegroundColor Green
+        }
         'Readiness' {
             $checks = @(Test-DxDecomReadiness -Server $Options.Server)
             Show-Checks -Checks $checks
@@ -259,6 +303,10 @@ $defaults = @{
     PstPath      = $PstPath
     IncludeArchive = [bool]$IncludeArchive
     PublicFolder = $PublicFolder
+    RelayDays    = $Days
+    RelaySource  = if ($LogPath -and $RelaySource -eq 'Auto') { 'Path' } else { $RelaySource }
+    LogPath      = $LogPath
+    Domain       = $Domain
 }
 
 # --- Webinterface -------------------------------------------------------------------
@@ -276,7 +324,8 @@ if ($Action -eq 'Web') {
 
 # --- Niet-interactief --------------------------------------------------------------
 if ($Action -ne 'Menu') {
-    if ($Action -ne 'ExportPublicFolders') { Initialize-Connection }
+    $offline = $Action -eq 'ExportPublicFolders' -or ($Action -eq 'RelayReport' -and $defaults.RelaySource -eq 'Path')
+    if (-not $offline) { Initialize-Connection }
     if ($Action -in 'Readiness', 'CleanLogs' -and -not $Server) {
         throw "Geef -Server op voor actie '$Action'."
     }
@@ -296,14 +345,15 @@ $menu = [ordered]@{
     '1'  = @{ Group = 'Onderzoek en rapportage'; Task = 'Inventory';                  Text = 'Volledige inventarisatie (HTML/CSV-rapport)' }
     '2'  = @{ Group = 'Onderzoek en rapportage'; Task = 'MailboxReport';              Text = 'Mailboxoverzicht: grootte, archief, laatste aanmelding' }
     '3'  = @{ Group = 'Onderzoek en rapportage'; Task = 'PublicFolderReport';         Text = 'Public folder-overzicht: items en grootte' }
-    '4'  = @{ Group = 'Onderzoek en rapportage'; Task = 'Readiness';                  Text = 'Uitfaseringscontrole voor een server' }
-    '5'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportMailboxes';            Text = 'Mailboxen exporteren naar PST' }
-    '6'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportPublicFolders';        Text = 'Public folders exporteren naar PST (via Outlook)' }
-    '7'  = @{ Group = 'Exporteren naar PST';     Task = 'PstStatus';                  Text = 'Status van PST-exports' }
-    '8'  = @{ Group = 'Opruimen';                Task = 'CleanLogs';                  Text = 'Oude Exchange- en IIS-logbestanden opruimen';          Confirm = $true }
-    '9'  = @{ Group = 'Opruimen';                Task = 'CleanRequests';              Text = 'Afgeronde verplaats/export/import-aanvragen opruimen'; Confirm = $true }
-    '10' = @{ Group = 'Opruimen';                Task = 'CleanDisconnectedMailboxes'; Text = 'Losgekoppelde mailboxen definitief verwijderen';       Confirm = $true }
-    '11' = @{ Group = 'Opruimen';                Task = 'CleanCertificates';          Text = 'Verlopen certificaten verwijderen';                    Confirm = $true }
+    '4'  = @{ Group = 'Onderzoek en rapportage'; Task = 'RelayReport';                Text = 'Relaygebruik: wie verstuurt nog mail via de server (SMTP-logs)' }
+    '5'  = @{ Group = 'Onderzoek en rapportage'; Task = 'Readiness';                  Text = 'Uitfaseringscontrole voor een server' }
+    '6'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportMailboxes';            Text = 'Mailboxen exporteren naar PST' }
+    '7'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportPublicFolders';        Text = 'Public folders exporteren naar PST (via Outlook)' }
+    '8'  = @{ Group = 'Exporteren naar PST';     Task = 'PstStatus';                  Text = 'Status van PST-exports' }
+    '9'  = @{ Group = 'Opruimen';                Task = 'CleanLogs';                  Text = 'Oude Exchange- en IIS-logbestanden opruimen';          Confirm = $true }
+    '10' = @{ Group = 'Opruimen';                Task = 'CleanRequests';              Text = 'Afgeronde verplaats/export/import-aanvragen opruimen'; Confirm = $true }
+    '11' = @{ Group = 'Opruimen';                Task = 'CleanDisconnectedMailboxes'; Text = 'Losgekoppelde mailboxen definitief verwijderen';       Confirm = $true }
+    '12' = @{ Group = 'Opruimen';                Task = 'CleanCertificates';          Text = 'Verlopen certificaten verwijderen';                    Confirm = $true }
 }
 
 try {
@@ -311,7 +361,7 @@ try {
 }
 catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host 'Zonder Exchange-verbinding werkt alleen "Public folders exporteren naar PST (via Outlook)".' -ForegroundColor Yellow
+    Write-Host 'Zonder Exchange-verbinding werken alleen "Relaygebruik" (map met logbestanden) en "Public folders exporteren naar PST (via Outlook)".' -ForegroundColor Yellow
 }
 
 while ($true) {
@@ -341,6 +391,23 @@ while ($true) {
             { $_ -in 'Readiness', 'CleanLogs', 'CleanCertificates' } { $options.Server = Read-Server -Default $Server }
             { $_ -in 'CleanLogs', 'CleanDisconnectedMailboxes' } { $options.Days = Read-Days -Default $OlderThanDays }
             { $_ -in 'Inventory', 'MailboxReport' } { $options.InactiveDays = Read-Days -Prompt 'Inactief na hoeveel dagen zonder aanmelding?' -Default $InactiveDays }
+            'RelayReport' {
+                $connected = [bool](Get-Command -Name Get-ExchangeServer -ErrorAction SilentlyContinue)
+                $choice = Read-Value -Prompt 'Bron? A = automatisch, P = protocollogs, M = message tracking, F = map met logbestanden' -Default $(if ($connected) { 'A' } else { 'F' })
+                $options.RelaySource = switch -Regex ($choice) { '^[Pp]' { 'ProtocolLog' } '^[Mm]' { 'MessageTracking' } '^[Ff]' { 'Path' } default { 'Auto' } }
+                if ($options.RelaySource -eq 'Path') {
+                    $options.LogPath = @((Read-Value -Prompt 'Map met RECV*.log-bestanden' -Default ($LogPath -join ',')) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                    if (-not $options.LogPath) { throw 'Geef een map met logbestanden op.' }
+                }
+                elseif (-not $connected) {
+                    throw 'Zonder Exchange-verbinding kan alleen een map met logbestanden worden geanalyseerd (kies F).'
+                }
+                $dayAnswer = Read-Value -Prompt 'Hoeveel dagen terug? (0 = alles in de logs)' -Default "$Days"
+                $parsed = 0
+                $options.RelayDays = if ([int]::TryParse($dayAnswer, [ref]$parsed) -and $parsed -ge 0) { $parsed } else { $Days }
+                $domainAnswer = Read-Value -Prompt 'Eigen domeinen, gescheiden door komma''s (leeg = accepted domains van Exchange)' -Default ($Domain -join ',')
+                $options.Domain = @($domainAnswer -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            }
             'ExportMailboxes' {
                 $options.PstPath = Read-Value -Prompt 'UNC-share voor de PST-bestanden (\\server\share)' -Default $PstPath
                 if ($options.PstPath -notmatch '^\\\\[^\\]+\\[^\\]+') {
