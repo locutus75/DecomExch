@@ -1,0 +1,11 @@
+#Software: Microsoft Exchange Server
+#Version: 15.02.1544.004
+#Log-type: SMTP Receive Protocol Log
+#Date: 2026-09-01T08:00:00.000Z
+#Fields: date-time,connector-id,session-id,sequence-number,local-endpoint,remote-endpoint,event,data,context
+2026-09-01T08:00:00.000Z,EX01\Relay scanners,08DCAAAA00000099,0,10.0.0.5:25,10.0.5.99:1000,+,,
+2026-09-01T08:00:00.010Z,EX01\Relay scanners,08DCAAAA00000099,1,10.0.0.5:25,10.0.5.99:1000,<,EHLO oudprinter,
+2026-09-01T08:00:00.020Z,EX01\Relay scanners,08DCAAAA00000099,2,10.0.0.5:25,10.0.5.99:1000,<,MAIL FROM:<printer@contoso.nl>,
+2026-09-01T08:00:00.030Z,EX01\Relay scanners,08DCAAAA00000099,3,10.0.0.5:25,10.0.5.99:1000,<,RCPT TO:<jan@contoso.nl>,
+2026-09-01T08:00:00.040Z,EX01\Relay scanners,08DCAAAA00000099,4,10.0.0.5:25,10.0.5.99:1000,>,250 2.6.0 <old@printer> Queued mail for delivery,
+2026-09-01T08:00:00.050Z,EX01\Relay scanners,08DCAAAA00000099,5,10.0.0.5:25,10.0.5.99:1000,-,,Local

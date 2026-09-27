@@ -42,6 +42,7 @@
     file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
     plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    relay: '<path d="M4 7h13l-3-3M20 17H7l3 3"/><circle cx="4" cy="17" r="1.5"/><circle cx="20" cy="7" r="1.5"/>',
   };
 
   function icon(name) {
@@ -437,6 +438,7 @@
         if (k.disconnected) items.push(item('warn', 'unlink', `${plural(k.disconnected, 'losgekoppelde mailbox neemt', 'losgekoppelde mailboxen nemen')} nog ruimte in.`, '#/cleanup', 'Opruimen'));
         if (k.inactiveMailboxes) items.push(item('warn', 'clock', `${plural(k.inactiveMailboxes, 'mailbox is', 'mailboxen zijn')} al lang niet gebruikt: exporteren of verwijderen?`, '#/mailboxes?inactive=1', 'Bekijken'));
         if (k.publicFolders) items.push(item('', 'folder', `${plural(k.publicFolders, 'public folder', 'public folders')} aanwezig: migreren of exporteren naar PST voor uitfasering.`, '#/publicfolders', 'Bekijken'));
+        items.push(item('', 'relay', 'Bekijk welke applicaties en apparaten de server nog als SMTP-relay gebruiken.', '#/relay', 'Relaygebruik'));
         items.push(item('', 'shield', 'Controleer per server wat de uitfasering nog blokkeert.', '#/readiness', 'Uitfaseringscontrole'));
 
         const serverTable = DataTable.auto(d.servers, { empty: 'Geen servers.' });
@@ -654,6 +656,193 @@
         } catch { /* gemeld */ }
       };
       if (state.cache.publicfolders) draw(state.cache.publicfolders); else await load();
+    },
+  };
+
+  // ---------- Relaygebruik
+  pages.relay = {
+    title: 'Relaygebruik', icon: 'relay', group: 'Onderzoek',
+    async render(root) {
+      root.appendChild(h('p', { class: 'page-intro', text: 'Wie gebruikt de server nog om mail te versturen? Op basis van de SMTP-logs: hoe vaak, door wie (IP-adres, naam, afzenders, account) en hoe (connector, poort, aanmelding, TLS, interne of externe ontvangers).' }));
+      const connected = state.status.connected;
+      const servers = connected ? await loadServers().catch(() => []) : [];
+
+      // Formulier
+      const sourceName = 'relay-source';
+      const opt = (value, label, checked) => h('label', null, h('input', { type: 'radio', name: sourceName, value, checked }), label);
+      const source = h('div', { class: 'segmented' },
+        opt('Auto', 'Automatisch', connected), opt('ProtocolLog', 'Protocollogs', false), opt('MessageTracking', 'Message tracking', false), opt('Path', 'Map met logbestanden', !connected));
+      const sourceHint = h('span', { class: 'hint' });
+      const serverList = h('div', { class: 'checklist' },
+        servers.filter((x) => !x.edge).map((x) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: x.name, checked: true }), x.name)));
+      const serverField = h('div', { class: 'field' }, h('span', { class: 'label', text: 'Servers' }), serverList);
+      const path = h('input', { type: 'text', placeholder: 'D:\\Logs\\SmtpReceive', value: state.cache.relayPath || '' });
+      const pathField = h('div', { class: 'field' }, h('label', { text: 'Map met logbestanden (RECV*.log)' }), path,
+        h('span', { class: 'hint', text: 'Kopieer de bestanden uit <Exchange>\\TransportRoles\\Logs\\FrontEnd\\ProtocolLog\\SmtpReceive (en Hub\\ProtocolLog\\SmtpReceive) van de server. Een Exchange-verbinding is dan niet nodig.' }));
+      const days = h('select', { class: 'input', 'aria-label': 'Periode' },
+        [[1, 'Laatste 24 uur'], [3, 'Laatste 3 dagen'], [7, 'Laatste 7 dagen'], [14, 'Laatste 14 dagen'], [30, 'Laatste 30 dagen'], [0, 'Alles in de logs']]
+          .map(([v, l]) => h('option', { value: v, text: l, selected: v === 7 })));
+      const domains = h('input', { type: 'text', placeholder: connected ? 'Standaard: de accepted domains van Exchange' : 'contoso.nl, *.contoso.com', value: state.cache.relayDomains || '' });
+      const includeExchange = h('input', { type: 'checkbox' });
+      const resolveDns = h('input', { type: 'checkbox' });
+
+      const sourceHints = {
+        Auto: 'Gebruikt de SMTP-protocollogs als die er zijn (het meest gedetailleerd), anders message tracking.',
+        ProtocolLog: 'SMTP Receive-protocollogs: IP, EHLO-naam, connector, poort, aanmelding, TLS, afzenders en ontvangers. Protocol logging moet aanstaan op de connector. Remote via \\\\server\\C$.',
+        MessageTracking: 'Message tracking staat standaard aan en werkt via remote PowerShell, maar laat geen aanmelding, TLS of EHLO-naam zien.',
+        Path: 'Analyseer gekopieerde RECV*.log-bestanden, bijvoorbeeld op een laptop zonder verbinding met Exchange.',
+      };
+      const updateSource = () => {
+        const v = source.querySelector('input:checked').value;
+        sourceHint.textContent = sourceHints[v];
+        pathField.classList.toggle('hidden', v !== 'Path');
+        serverField.classList.toggle('hidden', v === 'Path' || !connected);
+      };
+      source.addEventListener('change', updateSource);
+
+      const out = h('div');
+      const formCard = h('div', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', { text: 'Analyse' })),
+        h('div', { class: 'card-body' }, h('div', { class: 'form' },
+          connected ? null : h('div', { class: 'callout warn' }, icon('plug'), h('div', null, 'Niet verbonden met Exchange: alleen een map met logbestanden kan worden geanalyseerd. Vul dan ook de eigen domeinen in.')),
+          h('div', { class: 'field' }, h('span', { class: 'label', text: 'Bron' }), source, sourceHint),
+          serverField, pathField,
+          h('div', { class: 'form-row' },
+            h('div', { class: 'field' }, h('label', { text: 'Periode' }), days),
+            h('div', { class: 'field' }, h('label', { text: 'Eigen domeinen (voor intern/extern)' }), domains)),
+          h('div', { class: 'chips' },
+            h('label', { class: 'check' }, includeExchange, 'Verkeer tussen Exchange-servers meetellen'),
+            h('label', { class: 'check' }, resolveDns, 'DNS-namen opzoeken (trager)')),
+          h('div', null, h('button', { type: 'button', class: 'btn primary', onclick: run }, icon('search'), 'Analyseren')))));
+      root.appendChild(formCard);
+      root.appendChild(out);
+      updateSource();
+
+      async function run() {
+        const src = source.querySelector('input:checked').value;
+        if (!connected && src !== 'Path') { toast('Zonder Exchange-verbinding kan alleen een map met logbestanden worden geanalyseerd.', 'warn'); return; }
+        const body = {
+          source: src,
+          days: Number(days.value),
+          servers: [...serverList.querySelectorAll('input:checked')].map((i) => i.value),
+          path: path.value.trim(),
+          domains: domains.value.trim(),
+          includeExchangeServers: includeExchange.checked,
+          resolveDns: resolveDns.checked,
+        };
+        if (src === 'Path' && !body.path) { toast('Geef de map met logbestanden op.', 'warn'); path.focus(); return; }
+        state.cache.relayPath = body.path;
+        state.cache.relayDomains = body.domains;
+        try {
+          const res = await withBusy(formCard, () => api('POST', '/api/relay', body), 'SMTP-logs analyseren...', 'Grote logbestanden kunnen enkele minuten duren.');
+          state.cache.relay = res;
+          draw(res);
+        } catch { /* gemeld */ }
+      }
+
+      function draw(r) {
+        clear(out);
+        const clients = r.clients || [];
+        const total = clients.reduce((n, c) => n + (Number(c.Berichten) || 0), 0);
+        const internal = clients.filter((c) => c.Type === 'Intern (applicatie/apparaat)');
+        const anonExternal = clients.filter((c) => c.RelayNaarExtern && (c.Aanmelding === 'Anoniem' || c.Aanmelding === 'Gemengd'));
+
+        out.appendChild(h('div', { class: 'callout' }, icon('info'), h('div', null,
+          h('strong', { text: `Bron: ${r.source}. ` }),
+          `Periode ${r.from || 'begin van de logs'} t/m ${r.to || '-'}`,
+          r.servers ? ` \u00b7 ${r.servers}` : '',
+          r.files ? ` \u00b7 ${plural(r.files, 'logbestand', 'logbestanden')}` : '',
+          ` \u00b7 ${fmtNum(r.records)} sessies/berichten gelezen.`)));
+
+        const tile = (label, iconName, value, note, cls = '') => h('div', { class: 'card kpi ' + cls },
+          h('div', { class: 'kpi-label' }, icon(iconName), label), h('div', { class: 'kpi-value', text: value }), h('div', { class: 'kpi-note', text: note }));
+        out.appendChild(h('div', { class: 'grid kpis' },
+          tile('Clients', 'server', fmtNum(clients.length), 'die de server gebruiken'),
+          tile('Berichten', 'mailbox', fmtNum(total), 'ontvangen via SMTP'),
+          tile('Interne applicaties/apparaten', 'plug', fmtNum(internal.length), 'moeten worden omgezet', internal.length ? 'attention' : ''),
+          tile('Anoniem naar extern', 'warn', fmtNum(anonExternal.length), 'relay zonder aanmelding', anonExternal.length ? 'alert' : '')));
+
+        if (r.notes && r.notes.length) {
+          out.appendChild(h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { text: 'Aandachtspunten' })),
+            h('div', { class: 'card-body' }, h('div', { class: 'grid' }, r.notes.map((n) => {
+              const cls = /anoniem/i.test(n) ? 'bad' : /interne applicatie|MX-record|niet worden onderscheiden|Geen .*gevonden|niet worden gelezen/i.test(n) ? 'warn' : '';
+              return h('div', { class: 'callout ' + cls }, icon(cls === 'bad' ? 'warn' : 'info'), h('div', { text: n }));
+            })))));
+        }
+
+        const bars = (rows, labelKey, valueKey) => {
+          const max = Math.max(1, ...rows.map((x) => Number(x[valueKey]) || 0));
+          return rows.length ? h('div', { class: 'barlist' }, rows.map((x) => {
+            const bar = h('span'); bar.style.width = `${Math.round((Number(x[valueKey]) || 0) / max * 100)}%`;
+            return h('div', { class: 'row' }, h('span', { text: x[labelKey] }), h('div', { class: 'bar' }, bar), h('span', { class: 'num right', text: fmtNum(x[valueKey]) }));
+          })) : h('div', { class: 'empty', text: 'Geen gegevens.' });
+        };
+        const perType = Object.entries(clients.reduce((acc, c) => { acc[c.Type] = (acc[c.Type] || 0) + (Number(c.Berichten) || 0); return acc; }, {}))
+          .map(([Type, Berichten]) => ({ Type, Berichten })).sort((a, b) => b.Berichten - a.Berichten);
+        out.appendChild(h('div', { class: 'grid two' },
+          h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { text: 'Berichten per dag' })), h('div', { class: 'card-body' }, bars(r.perDay || [], 'Datum', 'Berichten'))),
+          h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { text: 'Berichten per soort client' })), h('div', { class: 'card-body' }, bars(perType, 'Type', 'Berichten')))));
+
+        // Clients
+        const typeClass = { 'Intern (applicatie/apparaat)': 'warn', 'Extern (internet)': 'accent', 'Exchange Online': 'ok', 'Exchange-server': '' };
+        const authClass = { Anoniem: 'warn', Gemengd: 'warn', Geauthenticeerd: 'ok', Onbekend: '' };
+        const tlsClass = { Ja: 'ok', Deels: 'warn', Nee: 'warn', Onbekend: '' };
+        const table = new DataTable({
+          rows: clients, empty: 'Geen SMTP-verkeer van clients gevonden in deze periode.',
+          columns: [
+            { key: 'Client', label: 'Client', mono: true, format: (v, row) => h('div', null, h('div', { text: v }), row.DnsNaam ? h('small', { class: 'muted', text: row.DnsNaam }) : null) },
+            { key: 'Naam', label: 'Naam (EHLO)' },
+            { key: 'Type', label: 'Soort', format: (v) => h('span', { class: 'badge ' + (typeClass[v] ?? ''), text: v }) },
+            { key: 'Berichten', label: 'Berichten', align: 'right', format: (v) => fmtNum(v) },
+            { key: 'Aanmelding', label: 'Aanmelding', format: (v, row) => h('div', null, h('span', { class: 'badge ' + (authClass[v] ?? ''), text: v }), row.Accounts ? h('div', null, h('small', { class: 'muted', text: row.Accounts })) : null) },
+            { key: 'TLS', label: 'TLS', format: (v) => h('span', { class: 'badge ' + (tlsClass[v] ?? ''), text: v }) },
+            { key: 'ExterneOntvangers', label: 'Naar extern', align: 'right', format: (v, row) => v === null || v === undefined ? h('span', { class: 'muted', text: '?' }) : (v > 0 ? h('span', { class: 'badge warn', title: row.VoorbeeldExtern || '', text: fmtNum(v) }) : '0') },
+            { key: 'Afzenders', label: 'Afzenders', wrap: true },
+            { key: 'Connectors', label: 'Connector', wrap: true, format: (v, row) => h('div', null, v || '', row.Poorten ? h('div', null, h('small', { class: 'muted', text: `poort ${row.Poorten}` })) : null) },
+            { key: 'Sessies', label: 'Sessies', align: 'right', format: (v) => fmtNum(v) },
+            { key: 'LaatsteKeer', label: 'Laatst gezien' },
+          ],
+        });
+        let typeFilter = '';
+        const chips = h('div', { class: 'chips' });
+        const drawChips = () => {
+          clear(chips);
+          const counts = clients.reduce((acc, c) => { acc[c.Type] = (acc[c.Type] || 0) + 1; return acc; }, {});
+          [['', `Alles (${clients.length})`], ...Object.keys(counts).sort().map((t) => [t, `${t} (${counts[t]})`])]
+            .forEach(([t, label]) => chips.appendChild(h('button', { type: 'button', class: 'chip' + (typeFilter === t ? ' active' : ''), text: label, onclick: () => { typeFilter = t; table.setFilter(t ? (row) => row.Type === t : null); drawChips(); } })));
+        };
+        drawChips();
+        out.appendChild(h('div', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', { text: 'Clients' }), chips, h('div', { class: 'actions' }, exportButtons(() => table.visibleRows(), 'Relaygebruik', 'Relaygebruik'))),
+          h('div', { class: 'toolbar' }, searchBox((v) => table.setSearch(v), 'Zoek op IP, naam, afzender, account...')),
+          h('div', { class: 'card-body flush' }, table.el)));
+      }
+
+      // Receive connectors
+      if (connected) {
+        const connTable = new DataTable({
+          empty: 'Geen receive connectors gevonden.',
+          columns: [
+            { key: 'Server', label: 'Server' },
+            { key: 'Connector', label: 'Connector', format: (v, row) => h('div', null, v, ' ', row.Eigen ? h('span', { class: 'badge accent', text: 'eigen' }) : null, row.Bindings ? h('div', null, h('small', { class: 'muted', text: row.Bindings })) : null) },
+            { key: 'Logging', label: 'Protocol logging', format: (v) => h('span', { class: 'badge ' + (v === 'Verbose' ? 'ok' : 'warn'), text: v || '-' }) },
+            { key: 'Advies', label: 'Advies', wrap: true },
+            { key: 'ExterneIPs', label: 'Toegestane IP-adressen', wrap: true },
+            { key: 'Rechten', label: 'Rechten', wrap: true },
+          ],
+        });
+        const connCard = h('div', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', { text: 'Receive connectors' }), h('span', { class: 'sub', text: 'Protocol logging moet aanstaan om te zien wie een connector gebruikt.' }),
+            h('div', { class: 'actions' }, h('button', { type: 'button', class: 'btn small', onclick: () => loadConnectors() }, icon('refresh'), 'Vernieuwen'))),
+          h('div', { class: 'card-body flush' }, connTable.el));
+        root.appendChild(connCard);
+        const loadConnectors = async () => {
+          try { const rows = await withBusy(connCard, () => api('GET', '/api/receiveconnectors'), 'Connectors ophalen...', null); state.cache.connectors = rows; connTable.setRows(rows); } catch { /* gemeld */ }
+        };
+        if (state.cache.connectors) connTable.setRows(state.cache.connectors); else loadConnectors();
+      }
+
+      if (state.cache.relay) draw(state.cache.relay);
     },
   };
 
@@ -997,7 +1186,7 @@
     },
   };
 
-  const ORDER = ['dashboard', 'inventory', 'mailboxes', 'publicfolders', 'readiness', 'export', 'cleanup', 'log'];
+  const ORDER = ['dashboard', 'inventory', 'mailboxes', 'publicfolders', 'relay', 'readiness', 'export', 'cleanup', 'log'];
 
   // ------------------------------------------------------------------ navigatie
   function buildNav() {

@@ -234,6 +234,48 @@ function Invoke-DxApiRoute {
             return ,@(Get-DxPublicFolderReport | Sort-Object Map | ConvertTo-DxJsonSafe)
         }
 
+        'POST /api/relay' {
+            $source = "$(Get-DxBodyValue -Body $Body -Name 'source' -Default 'Auto')"
+            if ($source -notin 'Auto', 'ProtocolLog', 'MessageTracking', 'Path') {
+                throw (New-Object System.ArgumentException "Onbekende bron: $source")
+            }
+            $params = @{
+                Source                 = $source
+                Days                   = [int](Get-DxBodyValue -Body $Body -Name 'days' -Default 7)
+                IncludeExchangeServers = [bool](Get-DxBodyValue -Body $Body -Name 'includeExchangeServers' -Default $false)
+                ResolveDns             = [bool](Get-DxBodyValue -Body $Body -Name 'resolveDns' -Default $false)
+                Report                 = $true
+            }
+            if ($params['Days'] -lt 0 -or $params['Days'] -gt 365) { throw (New-Object System.ArgumentException 'Periode moet tussen 0 en 365 dagen liggen.') }
+            $servers = @(Get-DxStringList (Get-DxBodyValue -Body $Body -Name 'servers'))
+            if ($servers.Count -gt 0) { $params['Server'] = $servers }
+            $domains = @(Get-DxStringList (Get-DxBodyValue -Body $Body -Name 'domains'))
+            if ($domains.Count -gt 0) { $params['Domain'] = $domains }
+            if ($source -eq 'Path') {
+                $paths = @(Get-DxStringList (Get-DxBodyValue -Body $Body -Name 'path'))
+                if ($paths.Count -eq 0) { throw (New-Object System.ArgumentException 'Geef de map met logbestanden op.') }
+                $params['Path'] = $paths
+            }
+
+            $r = Get-DxRelayUsage @params
+            $format = { param($d) if ($d -is [datetime] -and $d -gt [datetime]::MinValue) { $d.ToString('yyyy-MM-dd HH:mm') } else { $null } }
+            return [ordered]@{
+                source  = $r.Bron
+                from    = & $format $r.Van
+                to      = & $format $r.Tot
+                servers = $r.Servers
+                files   = $r.Bestanden
+                records = $r.Records
+                clients = @($r.Clients | ConvertTo-DxJsonSafe)
+                perDay  = @($r.PerDag | ConvertTo-DxJsonSafe)
+                notes   = @($r.Opmerkingen)
+            }
+        }
+
+        'GET /api/receiveconnectors' {
+            return ,@(Get-DxReceiveConnectorReport | ConvertTo-DxJsonSafe)
+        }
+
         'POST /api/readiness' {
             $server = "$(Get-DxBodyValue -Body $Body -Name 'server' -Default '')".Trim()
             if (-not $server) { throw (New-Object System.ArgumentException 'Kies een server.') }

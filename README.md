@@ -85,24 +85,25 @@ In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de in
 | 1 | **Volledige inventarisatie**: servers, databases, mailboxen per type (incl. arbitration/audit/public folder), mailboxoverzicht, public folders, losgekoppelde mailboxen, aanvragen, migratiebatches, connectors, domeinen, adresbeleid, certificaten, Autodiscover, hybride configuratie. |
 | 2 | **Mailboxoverzicht**: per mailbox grootte, aantal items, archief, laatste aanmelding en of de mailbox *inactief* is (standaard > 90 dagen niet aangemeld). |
 | 3 | **Public folder-overzicht**: pad, aantal items, grootte, laatste wijziging en mail-enabled adres. |
-| 4 | **Uitfaseringscontrole** per server, met per punt *OK / Info / Waarschuwing / Blokkerend* en de oplossing. |
+| 4 | **Relaygebruik**: wie verstuurt nog mail via de server, hoe vaak, en hoe (aanmelding, TLS, connector, interne of externe ontvangers). Zie [Relaygebruik](#relaygebruik). |
+| 5 | **Uitfaseringscontrole** per server, met per punt *OK / Info / Waarschuwing / Blokkerend* en de oplossing. |
 
 **Exporteren naar PST**
 
 | # | Onderdeel |
 |---|-----------|
-| 5 | **Mailboxen exporteren**: alle mailboxen, per database of een selectie, optioneel inclusief online archief (`<alias>.pst` en `<alias>_Archief.pst`). |
-| 6 | **Public folders exporteren** (met submappen) naar een PST, via Outlook. |
-| 7 | **Status van PST-exports** met voortgang per aanvraag. |
+| 6 | **Mailboxen exporteren**: alle mailboxen, per database of een selectie, optioneel inclusief online archief (`<alias>.pst` en `<alias>_Archief.pst`). |
+| 7 | **Public folders exporteren** (met submappen) naar een PST, via Outlook. |
+| 8 | **Status van PST-exports** met voortgang per aanvraag. |
 
 **Opruimen** (wijzigt iets, altijd eerst simuleren)
 
 | # | Onderdeel |
 |---|-----------|
-| 8 | **Logbestanden**: Exchange `Logging`, Search `ETLTraces`/`Logs` en IIS-logs ouder dan N dagen. Transactielogs en databasemappen worden altijd overgeslagen. |
-| 9 | **Afgeronde aanvragen**: move-, export-, import- en restore-aanvragen en migratiebatches. Lopende aanvragen worden nooit aangeraakt. |
-| 10 | **Losgekoppelde mailboxen** (Disabled/SoftDeleted) definitief verwijderen (onomkeerbaar). |
-| 11 | **Verlopen certificaten**. Gekoppelde certificaten en het OAuth-certificaat worden overgeslagen. |
+| 9 | **Logbestanden**: Exchange `Logging`, Search `ETLTraces`/`Logs` en IIS-logs ouder dan N dagen. Transactielogs en databasemappen worden altijd overgeslagen. |
+| 10 | **Afgeronde aanvragen**: move-, export-, import- en restore-aanvragen en migratiebatches. Lopende aanvragen worden nooit aangeraakt. |
+| 11 | **Losgekoppelde mailboxen** (Disabled/SoftDeleted) definitief verwijderen (onomkeerbaar). |
+| 12 | **Verlopen certificaten**. Gekoppelde certificaten en het OAuth-certificaat worden overgeslagen. |
 
 ### Controles bij uitfasering
 
@@ -125,6 +126,51 @@ In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de in
 - Bij gebruik via parameters wordt alleen echt geexporteerd of gewijzigd met `-Execute`.
 - Alle functies die iets verwijderen of exporteren ondersteunen `-WhatIf` en `-Confirm`.
 - Elke sessie schrijft een logbestand naar `Output\Logs`.
+
+## Relaygebruik
+
+Voordat een server weg kan, moet duidelijk zijn welke applicaties, scanners, printers en servers er
+nog mail via versturen. **Relaygebruik** leest de SMTP-logs en vat het verkeer samen per client:
+
+- **Hoe vaak**: aantal berichten en sessies, eerste en laatste keer, berichten per dag.
+- **Door wie**: IP-adres, naam (EHLO en optioneel DNS), soort client (intern apparaat/applicatie,
+  extern op internet, Exchange Online), afzenders en het account waarmee is aangemeld.
+- **Hoe**: connector en poort, anoniem of met aanmelding, TLS, en of er naar externe adressen wordt
+  verstuurd (echte relay).
+
+Daarnaast toont de pagina alle receive connectors, en of daarop protocol logging aanstaat.
+
+| Bron | Wat je ziet | Voorwaarde |
+|---|---|---|
+| **SMTP-protocollogs** (`RECV*.log`) | Alles, inclusief aanmelding, TLS, EHLO-naam, connector en poort | Protocol logging `Verbose` op de receive connector; remote via `\\server\C$` |
+| **Message tracking** | Aantallen, IP-adres, afzenders en ontvangers; geen aanmelding of TLS | Staat standaard aan; werkt via remote PowerShell |
+| **Map met logbestanden** | Hetzelfde als de protocollogs | Gekopieerde `RECV*.log`-bestanden; geen Exchange-verbinding nodig |
+
+`Automatisch` gebruikt de protocollogs als die er zijn, en anders message tracking. De protocollogs
+staan standaard in `<Exchange>\TransportRoles\Logs\FrontEnd\ProtocolLog\SmtpReceive` en
+`...\Hub\ProtocolLog\SmtpReceive`. Verkeer tussen Exchange-servers wordt niet meegeteld; zonder
+Exchange-verbinding worden die herkend aan poort 2525 en `X-ANONYMOUSTLS`.
+
+Staat protocol logging uit op een eigen (relay-)connector, zet het dan eerst aan en wacht een paar
+dagen:
+
+```powershell
+Set-ReceiveConnector -Identity 'EX01\Relay scanners' -ProtocolLoggingLevel Verbose
+```
+
+```powershell
+# Webinterface: pagina Relaygebruik. Of vanaf de opdrachtregel:
+.\DecomExch.ps1 -Action RelayReport -Days 14
+.\DecomExch.ps1 -Action RelayReport -LogPath D:\Logs\SmtpReceive -Domain contoso.nl,contoso.com -Days 0
+
+# Als module
+Get-DxRelayUsage -Days 7 | Where-Object Type -eq 'Intern (applicatie/apparaat)' |
+    Format-Table Client, Naam, Berichten, Aanmelding, TLS, ExterneOntvangers, Afzenders
+Get-DxReceiveConnectorReport | Where-Object Advies
+```
+
+Grote logbestanden kosten tijd: reken op ongeveer 20.000 logregels per seconde. Beperk de periode
+met `-Days` als dat te lang duurt.
 
 ## Exporteren naar PST
 
@@ -198,7 +244,7 @@ daarom **Outlook**: er wordt een PST aan het Outlook-profiel gekoppeld, de gekoz
 .\DecomExch.ps1 -Action CleanLogs -Server EX01 -OlderThanDays 30 -Execute
 ```
 
-Acties: `Web`, `Inventory`, `MailboxReport`, `PublicFolderReport`, `Readiness`, `ExportMailboxes`, `ExportPublicFolders`,
+Acties: `Web`, `Inventory`, `MailboxReport`, `RelayReport`, `PublicFolderReport`, `Readiness`, `ExportMailboxes`, `ExportPublicFolders`,
 `PstStatus`, `CleanLogs`, `CleanRequests`, `CleanDisconnectedMailboxes`, `CleanCertificates`.
 
 De functies zijn ook los te gebruiken als module:
@@ -222,7 +268,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\DecomExch\DecomExch.p
 ## Stappenplan uitfaseren (samengevat)
 
 1. **Inventarisatie** maken en bewaren als nulmeting; bepaal met het mailbox- en public folder-overzicht
-   wat bewaard moet worden.
+   wat bewaard moet worden. Bekijk met **Relaygebruik** welke applicaties en apparaten nog mail via
+   de server versturen.
 2. Wat bewaard moet worden maar niet wordt gemigreerd **exporteren naar PST**.
 3. **Uitfaseringscontrole** draaien voor de server.
 4. Blokkerende punten oplossen: mailboxen/systeemmailboxen verplaatsen, server uit de DAG halen,

@@ -1,6 +1,6 @@
 @{
     RootModule        = 'DecomExch.psm1'
-    ModuleVersion     = '1.3.3'
+    ModuleVersion     = '1.4.0'
     GUID              = '5b0f6f0e-8f5d-4a55-9d0e-3c1b7b7d2a11'
     Author            = 'DecomExch'
     Description       = 'Onderzoeken, rapporteren, exporteren naar PST, opruimen en uitfaseren van on-premises Exchange servers.'
@@ -10,6 +10,8 @@
         'Get-DxInventory'
         'Get-DxMailboxReport'
         'Get-DxPublicFolderReport'
+        'Get-DxRelayUsage'
+        'Get-DxReceiveConnectorReport'
         'Export-DxMailboxToPst'
         'Get-DxPstExportStatus'
         'Export-DxPublicFolderToPst'
