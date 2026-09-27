@@ -17,8 +17,8 @@
 
 .PARAMETER Action
     Menu (standaard), Web, Inventory, MailboxReport, PublicFolderReport, RelayReport, Readiness,
-    ExportMailboxes, ExportPublicFolders, PstStatus,
-    CleanLogs, CleanRequests, CleanDisconnectedMailboxes, CleanCertificates.
+    HybridReport, ExportMailboxes, ExportPublicFolders, PstStatus,
+    CleanLogs, CleanRequests, CleanDisconnectedMailboxes, CleanCertificates, CleanHybrid.
 
 .PARAMETER Execute
     Alleen voor niet-interactieve export- en opruimacties: voer de actie echt uit.
@@ -56,12 +56,18 @@
     .\DecomExch.ps1 -Action RelayReport -LogPath D:\Logs\SmtpReceive -Domain contoso.nl -Days 0
 
     Analyseert gekopieerde RECV*.log-bestanden, zonder Exchange-verbinding.
+
+.EXAMPLE
+    .\DecomExch.ps1 -Action CleanHybrid
+
+    Simuleert het opruimen van de hybride koppeling met Exchange Online (met -Execute echt uitvoeren;
+    er wordt eerst een back-up gemaakt in <OutputPath>\Backup).
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu', 'Web', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'RelayReport', 'Readiness',
+    [ValidateSet('Menu', 'Web', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'RelayReport', 'Readiness', 'HybridReport',
         'ExportMailboxes', 'ExportPublicFolders', 'PstStatus',
-        'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates')]
+        'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates', 'CleanHybrid')]
     [string]$Action = 'Menu',
 
     [string]$Server,
@@ -117,7 +123,10 @@ param(
     [string[]]$LogPath,
 
     # Relaygebruik: eigen domeinen voor intern/extern (standaard de accepted domains).
-    [string[]]$Domain
+    [string[]]$Domain,
+
+    # CleanHybrid: ook uitvoeren als er nog mailboxen of migraties on-premises zijn.
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -251,6 +260,17 @@ function Invoke-Task {
             $report = $checks | Export-DxReport -Path $OutputPath -Title "Uitfaseringscontrole $($Options.Server)" -NoCsv
             Write-Host "Rapport: $report" -ForegroundColor Green
         }
+        'HybridReport' {
+            $r = Get-DxHybridReport
+            Show-Checks -Checks $r.Controles
+            Write-Host ''
+            Show-Result -Result $r.Onderdelen -Empty 'Geen hybride koppeling met Exchange Online gevonden.' -Property Onderdeel, Naam, Actie, Standaard, Opmerking
+            Write-Host 'Daarnaast handmatig (Exchange Online, DNS, Entra Connect):' -ForegroundColor Cyan
+            foreach ($m in $r.Handmatig) { Write-Host (' {0,2}. [{1}] {2}: {3}' -f $m.Stap, $m.Waar, $m.Wat, $m.Opdracht) }
+            $report = [ordered]@{ 'Onderdelen' = @($r.Onderdelen); 'Controles' = @($r.Controles); 'Handmatige stappen' = @($r.Handmatig) } |
+                Export-DxReport -Path $OutputPath -Title 'Hybride koppeling'
+            Write-Host "Rapport: $report" -ForegroundColor Green
+        }
         'ExportMailboxes' {
             $params = @{ FilePath = $Options.PstPath; IncludeArchive = [bool]$Options.IncludeArchive }
             if ($Options.Database) { $params['Database'] = $Options.Database }
@@ -291,6 +311,13 @@ function Invoke-Task {
             Show-Result -Result @(Remove-DxExpiredCertificate @params @whatIf) -Empty 'Geen verlopen certificaten gevonden.' `
                 -Property Server, Subject, NotAfter, Services, Verwijderd, Opmerking
         }
+        'CleanHybrid' {
+            $result = @(Remove-DxHybridConfiguration -BackupPath (Join-Path $OutputPath 'Backup') -Force:$Options.Force @whatIf)
+            Show-Result -Result $result -Empty 'Geen hybride koppeling om op te ruimen.' -Property Onderdeel, Naam, Actie, Uitgevoerd, Opmerking
+            if (-not $Simulate -and $result.Count -gt 0) {
+                Write-Host "Back-up: $(Join-Path $OutputPath 'Backup'). Vergeet de stappen in Exchange Online en DNS niet (actie HybridReport)." -ForegroundColor Cyan
+            }
+        }
     }
 }
 
@@ -307,6 +334,7 @@ $defaults = @{
     RelaySource  = if ($LogPath -and $RelaySource -eq 'Auto') { 'Path' } else { $RelaySource }
     LogPath      = $LogPath
     Domain       = $Domain
+    Force        = [bool]$Force
 }
 
 # --- Webinterface -------------------------------------------------------------------
@@ -347,13 +375,15 @@ $menu = [ordered]@{
     '3'  = @{ Group = 'Onderzoek en rapportage'; Task = 'PublicFolderReport';         Text = 'Public folder-overzicht: items en grootte' }
     '4'  = @{ Group = 'Onderzoek en rapportage'; Task = 'RelayReport';                Text = 'Relaygebruik: wie verstuurt nog mail via de server (SMTP-logs)' }
     '5'  = @{ Group = 'Onderzoek en rapportage'; Task = 'Readiness';                  Text = 'Uitfaseringscontrole voor een server' }
-    '6'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportMailboxes';            Text = 'Mailboxen exporteren naar PST' }
-    '7'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportPublicFolders';        Text = 'Public folders exporteren naar PST (via Outlook)' }
-    '8'  = @{ Group = 'Exporteren naar PST';     Task = 'PstStatus';                  Text = 'Status van PST-exports' }
-    '9'  = @{ Group = 'Opruimen';                Task = 'CleanLogs';                  Text = 'Oude Exchange- en IIS-logbestanden opruimen';          Confirm = $true }
-    '10' = @{ Group = 'Opruimen';                Task = 'CleanRequests';              Text = 'Afgeronde verplaats/export/import-aanvragen opruimen'; Confirm = $true }
-    '11' = @{ Group = 'Opruimen';                Task = 'CleanDisconnectedMailboxes'; Text = 'Losgekoppelde mailboxen definitief verwijderen';       Confirm = $true }
-    '12' = @{ Group = 'Opruimen';                Task = 'CleanCertificates';          Text = 'Verlopen certificaten verwijderen';                    Confirm = $true }
+    '6'  = @{ Group = 'Onderzoek en rapportage'; Task = 'HybridReport';               Text = 'Hybride koppeling met Exchange Online in kaart brengen' }
+    '7'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportMailboxes';            Text = 'Mailboxen exporteren naar PST' }
+    '8'  = @{ Group = 'Exporteren naar PST';     Task = 'ExportPublicFolders';        Text = 'Public folders exporteren naar PST (via Outlook)' }
+    '9'  = @{ Group = 'Exporteren naar PST';     Task = 'PstStatus';                  Text = 'Status van PST-exports' }
+    '10' = @{ Group = 'Opruimen';                Task = 'CleanLogs';                  Text = 'Oude Exchange- en IIS-logbestanden opruimen';          Confirm = $true }
+    '11' = @{ Group = 'Opruimen';                Task = 'CleanRequests';              Text = 'Afgeronde verplaats/export/import-aanvragen opruimen'; Confirm = $true }
+    '12' = @{ Group = 'Opruimen';                Task = 'CleanDisconnectedMailboxes'; Text = 'Losgekoppelde mailboxen definitief verwijderen';       Confirm = $true }
+    '13' = @{ Group = 'Opruimen';                Task = 'CleanCertificates';          Text = 'Verlopen certificaten verwijderen';                    Confirm = $true }
+    '14' = @{ Group = 'Opruimen';                Task = 'CleanHybrid';                Text = 'Hybride koppeling met Exchange Online opruimen';        Confirm = $true }
 }
 
 try {
@@ -390,6 +420,17 @@ while ($true) {
         switch ($item.Task) {
             { $_ -in 'Readiness', 'CleanLogs', 'CleanCertificates' } { $options.Server = Read-Server -Default $Server }
             { $_ -in 'CleanLogs', 'CleanDisconnectedMailboxes' } { $options.Days = Read-Days -Default $OlderThanDays }
+            'CleanHybrid' {
+                $options.Force = $Force
+                if (-not $simulate) {
+                    $blockers = @((Get-DxHybridReport).Controles | Where-Object Status -eq 'Blokkerend')
+                    if ($blockers.Count -gt 0) {
+                        Show-Checks -Checks $blockers
+                        $options.Force = Read-YesNo -Prompt 'Toch doorgaan ondanks de blokkerende punten?' -Default $false
+                        if (-not $options.Force) { throw 'Geannuleerd: los eerst de blokkerende punten op.' }
+                    }
+                }
+            }
             { $_ -in 'Inventory', 'MailboxReport' } { $options.InactiveDays = Read-Days -Prompt 'Inactief na hoeveel dagen zonder aanmelding?' -Default $InactiveDays }
             'RelayReport' {
                 $connected = [bool](Get-Command -Name Get-ExchangeServer -ErrorAction SilentlyContinue)

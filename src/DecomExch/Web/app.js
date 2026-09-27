@@ -42,6 +42,7 @@
     file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
     plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    cloud: '<path d="M17.5 19H7a5 5 0 1 1 1.1-9.88A6 6 0 0 1 19.5 11 4 4 0 0 1 17.5 19z"/>',
     relay: '<path d="M4 7h13l-3-3M20 17H7l3 3"/><circle cx="4" cy="17" r="1.5"/><circle cx="20" cy="7" r="1.5"/>',
   };
 
@@ -1161,6 +1162,120 @@
     },
   };
 
+  // ---------- Hybride koppeling
+  pages.hybrid = {
+    title: 'Hybride koppeling', icon: 'cloud', group: 'Opruimen',
+    async render(root) {
+      if (!state.status.connected) { root.appendChild(notConnectedCard()); return; }
+      root.appendChild(h('p', { class: 'page-intro', text: 'Ruim de hybride koppeling met Exchange Online op aan de on-premises kant: connectors, organization relationship, OAuth, federatie en het HCW-object. Doe dit pas als alle mailboxen in Exchange Online staan en MX en Autodiscover daarheen wijzen. Bij een echte uitvoering wordt eerst een back-up gemaakt.' }));
+      const out = h('div');
+      const head = h('div', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', { text: 'Hybride koppeling' }), h('div', { class: 'actions' },
+          h('button', { type: 'button', class: 'btn small', onclick: () => load() }, icon('refresh'), 'Opnieuw ophalen'))),
+        h('div', { class: 'card-body' }, h('p', { class: 'desc', text: 'Er wordt niets gewijzigd bij het ophalen.' })));
+      root.appendChild(head);
+      root.appendChild(out);
+
+      const load = async () => {
+        try {
+          const res = await withBusy(head, () => api('GET', '/api/hybrid'), 'Hybride koppeling ophalen...');
+          state.cache.hybrid = res;
+          draw(res);
+        } catch { /* gemeld */ }
+      };
+
+      function draw(res) {
+        clear(out);
+        const ok = res.blockers === 0;
+        out.appendChild(h('div', { class: 'verdict ' + (!res.present ? 'ok' : ok ? 'ok' : 'bad') },
+          h('div', { class: 'icon' }, icon(!res.present || ok ? 'check' : 'x')),
+          h('div', null,
+            h('h3', { text: !res.present ? 'Geen hybride koppeling gevonden' : ok ? 'De hybride koppeling kan worden opgeruimd' : 'Nog niet klaar om de koppeling op te ruimen' }),
+            h('p', { text: !res.present
+              ? 'Er zijn on-premises geen onderdelen van een koppeling met Exchange Online gevonden. Controleer wel de handmatige stappen hieronder.'
+              : ok ? `Geen blokkerende punten. Loop de ${plural(res.warnings, 'waarschuwing', 'waarschuwingen')} na en draai eerst een simulatie.`
+                : `${plural(res.blockers, 'blokkerend punt', 'blokkerende punten')}: zolang er mailboxen of migraties on-premises zijn, breekt opruimen de mailflow en free/busy.` }))));
+
+        // Voorwaarden
+        const order = { Blokkerend: 0, Waarschuwing: 1, Info: 2, OK: 3 };
+        const list = h('div', { class: 'checks' });
+        [...res.checks].sort((a, b) => (order[a.Status] ?? 9) - (order[b.Status] ?? 9)).forEach((c) => list.appendChild(h('div', { class: 'check-item' },
+          h('div', null, statusBadge(c.Status)),
+          h('div', null, h('h4', { text: c.Check }),
+            c.Details ? h('div', { class: 'details', text: c.Details }) : null,
+            c.Oplossing && c.Status !== 'OK' ? h('div', { class: 'fix' }, h('strong', { text: 'Oplossing: ' }), c.Oplossing) : null))));
+        out.appendChild(h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { text: 'Voorwaarden' })), list));
+
+        // Onderdelen
+        const actionBadge = (v) => h('span', { class: 'badge ' + ({ Verwijderen: 'bad', Uitschakelen: 'warn', Aanpassen: 'accent' }[v] || ''), text: v });
+        const cols = [
+          { key: 'Onderdeel', label: 'Onderdeel' },
+          { key: 'Naam', label: 'Naam', wrap: true },
+          { key: 'Actie', label: 'Actie', format: actionBadge },
+          { key: 'Details', label: 'Details', wrap: true },
+          { key: 'Opmerking', label: 'Opmerking', wrap: true },
+        ];
+        const todo = res.components.filter((c) => c.Actie !== 'Behouden');
+        const keep = res.components.filter((c) => c.Actie === 'Behouden');
+        const count = h('span', { class: 'badge' });
+        const table = new DataTable({ rows: todo, columns: cols, key: (r) => r.Id, selectable: true, empty: 'Niets op te ruimen.',
+          onSelect: (sel) => { count.textContent = `${plural(sel.length, 'onderdeel', 'onderdelen')} gekozen`; } });
+        todo.filter((c) => c.Standaard).forEach((c) => table.selected.add(c.Id));
+        table.render(); table.emitSelect();
+
+        const force = h('input', { type: 'checkbox' });
+        const result = h('div', { class: 'result' });
+        const cleanCard = h('div', { class: 'card danger-zone' },
+          h('div', { class: 'card-head' }, h('h2', { text: 'Op te ruimen (on-premises)' }), count, h('div', { class: 'actions' }, exportButtons(() => res.components, 'HybrideKoppeling', 'Hybride koppeling'))),
+          h('div', { class: 'card-body flush' }, table.el),
+          h('div', { class: 'card-body' }, h('div', { class: 'form' },
+            h('p', { class: 'desc', text: 'Niet-aangevinkte onderdelen zijn optioneel: bijvoorbeeld een send connector die alle uitgaande mail via Exchange Online stuurt, of federatie die nog door een andere organisatie wordt gebruikt. OAuth wordt uitgeschakeld in plaats van verwijderd.' }),
+            res.blockers ? h('label', { class: 'check' }, force, 'Toch uitvoeren ondanks de blokkerende punten') : null,
+            h('div', null, actionButton('destructive', { sim: 'Simuleren', live: 'Koppeling opruimen' }, run)),
+            result)));
+        out.appendChild(cleanCard);
+
+        if (keep.length) {
+          out.appendChild(h('div', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { text: 'Blijft staan' })),
+            h('div', { class: 'card-body flush' }, new DataTable({ rows: keep, columns: cols }).el)));
+        }
+
+        // Handmatige stappen
+        out.appendChild(h('div', { class: 'card' },
+          h('div', { class: 'card-head' }, h('h2', { text: 'Daarna handmatig: Exchange Online, DNS en Entra Connect' }), h('div', { class: 'actions' }, exportButtons(() => res.manual, 'HybrideHandmatig', 'Hybride koppeling - handmatige stappen'))),
+          h('div', { class: 'card-body flush' }, new DataTable({ rows: res.manual, columns: [
+            { key: 'Stap', label: '#', align: 'right' },
+            { key: 'Waar', label: 'Waar' },
+            { key: 'Wat', label: 'Wat', wrap: true },
+            { key: 'Opdracht', label: 'Opdracht', wrap: true, mono: true },
+          ] }).el)));
+
+        async function run() {
+          const ids = table.selectedRows().map((r) => r.Id);
+          if (!ids.length) { toast('Kies minimaal een onderdeel.', 'warn'); return; }
+          if (!(await confirmDestructive(`${plural(ids.length, 'onderdeel', 'onderdelen')} van de hybride koppeling opruimen`))) return;
+          try {
+            const rows = await withBusy(cleanCard, () => api('POST', '/api/clean/hybrid', { ids, force: force.checked, simulate: simulate(), confirm: state.live ? 'JA' : undefined }),
+              state.live ? 'Hybride koppeling opruimen...' : 'Simuleren...');
+            clear(result);
+            const done = rows.filter((r) => r.Uitgevoerd).length;
+            append(result, [
+              h('div', { class: 'summary-line' },
+                state.live ? h('span', { class: 'badge ok', text: `${fmtNum(done)} van ${fmtNum(rows.length)} uitgevoerd` }) : h('span', { class: 'badge accent', text: 'Simulatie: niets gewijzigd' }),
+                state.live ? 'Een back-up staat in de map Backup onder de uitvoermap.' : null),
+              new DataTable({ rows, columns: [
+                { key: 'Onderdeel', label: 'Onderdeel' }, { key: 'Naam', label: 'Naam', wrap: true }, { key: 'Actie', label: 'Actie', format: actionBadge },
+                { key: 'Uitgevoerd', label: 'Uitgevoerd', format: removedBadge }, { key: 'Opmerking', label: 'Opmerking', wrap: true }] }).el,
+            ]);
+            if (state.live) { state.cache.hybrid = null; state.cache.inventory = null; }
+          } catch { /* gemeld */ }
+        }
+      }
+
+      if (state.cache.hybrid) draw(state.cache.hybrid); else await load();
+    },
+  };
+
   // ---------- Logboek
   pages.log = {
     title: 'Logboek', icon: 'log', group: 'Opruimen',
@@ -1186,7 +1301,7 @@
     },
   };
 
-  const ORDER = ['dashboard', 'inventory', 'mailboxes', 'publicfolders', 'relay', 'readiness', 'export', 'cleanup', 'log'];
+  const ORDER = ['dashboard', 'inventory', 'mailboxes', 'publicfolders', 'relay', 'readiness', 'export', 'cleanup', 'hybrid', 'log'];
 
   // ------------------------------------------------------------------ navigatie
   function buildNav() {
