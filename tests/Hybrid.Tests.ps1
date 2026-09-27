@@ -97,6 +97,14 @@ Describe 'DecomExch hybride koppeling' {
             ($r.Controles | Where-Object Check -eq 'Remote mailboxen').Details | Should -Match '^2 remote'
             @($r.Handmatig).Count | Should -BeGreaterThan 5
             ($r.Handmatig | Where-Object Stap -eq 1).Opdracht | Should -Match 'contoso\.mail\.protection\.outlook\.com'
+            $steps = @($r.Handmatig)
+            @($steps | ForEach-Object { $_.Stap }) -join ',' | Should -Be ((1..$steps.Count) -join ',')
+            $install = [array]::IndexOf(@($steps | ForEach-Object { $_.Wat }), 'Module installeren (eenmalig)')
+            $connect = @($steps | Where-Object { $_.Opdracht -like 'Connect-ExchangeOnline*' })[0]
+            $install | Should -BeGreaterThan 0
+            $connect.Stap | Should -BeGreaterThan ($install + 1)
+            $connect.Opdracht | Should -Match '-DisableWAM'
+            ($steps | Where-Object Wat -eq 'Nieuw PowerShell-venster openen').Opdracht | Should -Match 'Exchange Management Shell'
         }
 
         It 'blokkeert bij mailboxen on-premises en waarschuwt voor de MX' {

@@ -155,7 +155,12 @@ Veiligheid:
   *Toch uitvoeren* is gekozen): zonder koppeling werken mailflow en free/busy tussen beide kanten niet meer.
 - MX en Autodiscover worden gecontroleerd (vanaf de computer waar DecomExch draait).
 
-Daarna handmatig, buiten de on-premises organisatie (het rapport geeft de opdrachten): DNS (MX,
+Daarna handmatig, buiten de on-premises organisatie (het rapport geeft de opdrachten). Doe de stappen
+voor Exchange Online in een **nieuw PowerShell-venster**, niet in de Exchange Management Shell of het venster
+van DecomExch: beide omgevingen hebben cmdlets met dezelfde naam. Installeer eenmalig de module
+(`Install-Module ExchangeOnlineManagement -Scope CurrentUser`) en verbind met een Microsoft 365-beheeraccount
+(`Connect-ExchangeOnline -UserPrincipalName ...`; lukt het aanmelden niet, voeg dan `-DisableWAM` toe of gebruik `-Device`).
+Verder: DNS (MX,
 Autodiscover, SPF), in Exchange Online de connectors `Inbound from ...`/`Outbound to ...`, de organization
 relationship `O365 to On-premises - ...`, de `HybridIOC` en migratie-endpoints, en eventueel de Hybrid Agent.
 Laat Entra Connect gebruikers synchroniseren en beheer ontvangers met de Exchange Management Tools.
