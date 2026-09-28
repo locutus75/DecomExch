@@ -107,6 +107,14 @@ In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de in
 | 13 | **Verlopen certificaten**. Gekoppelde certificaten en het OAuth-certificaat worden overgeslagen. |
 | 14 | **Hybride koppeling opruimen** aan de on-premises kant, met back-up vooraf. |
 
+**Diensten** (werkt ook als Exchange zelf niet meer draait)
+
+| # | Onderdeel |
+|---|-----------|
+| 15 | **Status van de Exchange-diensten** van een server, met de opgeslagen oorspronkelijke toestand. |
+| 16 | **Alle Exchange-diensten stoppen en uitschakelen** in een keer. Zie [Exchange-diensten stoppen en herstellen](#exchange-diensten-stoppen-en-herstellen). |
+| 17 | **Herstellen**: stoppen ongedaan maken. |
+
 ### Controles bij uitfasering
 
 - Laatste Exchange-server in de organisatie? (advies: Exchange Management Tools bij hybride/directory sync)
@@ -155,7 +163,12 @@ Veiligheid:
   *Toch uitvoeren* is gekozen): zonder koppeling werken mailflow en free/busy tussen beide kanten niet meer.
 - MX en Autodiscover worden gecontroleerd (vanaf de computer waar DecomExch draait).
 
-Daarna handmatig, buiten de on-premises organisatie (het rapport geeft de opdrachten): DNS (MX,
+Daarna handmatig, buiten de on-premises organisatie (het rapport geeft de opdrachten). Doe de stappen
+voor Exchange Online in een **nieuw PowerShell-venster**, niet in de Exchange Management Shell of het venster
+van DecomExch: beide omgevingen hebben cmdlets met dezelfde naam. Installeer eenmalig de module
+(`Install-Module ExchangeOnlineManagement -Scope CurrentUser`) en verbind met een Microsoft 365-beheeraccount
+(`Connect-ExchangeOnline -UserPrincipalName ...`; lukt het aanmelden niet, voeg dan `-DisableWAM` toe of gebruik `-Device`).
+Verder: DNS (MX,
 Autodiscover, SPF), in Exchange Online de connectors `Inbound from ...`/`Outbound to ...`, de organization
 relationship `O365 to On-premises - ...`, de `HybridIOC` en migratie-endpoints, en eventueel de Hybrid Agent.
 Laat Entra Connect gebruikers synchroniseren en beheer ontvangers met de Exchange Management Tools.
@@ -164,6 +177,37 @@ Laat Entra Connect gebruikers synchroniseren en beheer ontvangers met de Exchang
 .\DecomExch.ps1 -Action HybridReport
 .\DecomExch.ps1 -Action CleanHybrid            # simulatie
 .\DecomExch.ps1 -Action CleanHybrid -Execute   # echt, met back-up
+```
+
+## Exchange-diensten stoppen en herstellen
+
+Om een server buiten gebruik te zetten zonder hem te verwijderen ("scream test") kun je alle
+Exchange-diensten in een keer stoppen en op *Uitgeschakeld* zetten (menu 16, webpagina
+**Exchange-diensten**, of `Stop-DxExchangeService`):
+
+1. De huidige status en het opstarttype van elke dienst (ook *vertraagd starten*) worden opgeslagen in
+   `Output\Diensten\Diensten_<SERVER>.json`. Een tweede keer stoppen overschrijft dit niet.
+2. Alle diensten gaan op *Disabled*, zodat Managed Availability of herstelacties ze niet opnieuw starten.
+3. Draaiende diensten worden gestopt, afhankelijke diensten eerst.
+
+Herkend worden alle diensten `MSExchange*`, `MSComplianceAudit`, `HostControllerService` (Search),
+`SearchExchangeTracing`, `wsbexchange` en alles wat uit de Exchange-installatiemap draait. Met
+**-IncludeIis** stoppen ook `W3SVC`, `WAS` en `IISADMIN` (OWA, ECP, EWS, ActiveSync en Autodiscover
+reageren dan helemaal niet meer; let op andere websites op dezelfde server).
+
+**Herstellen** (menu 17, `Restore-DxExchangeService`) zet de opstarttypes terug en start de diensten die
+draaiden. Zonder opgeslagen toestand (bijvoorbeeld gestopt vanaf een andere computer) worden de
+standaardwaarden van Exchange gebruikt: Automatisch, behalve IMAP4/POP3 en Windows Server Backup (Handmatig).
+
+De diensten worden via CIM beheerd (WinRM, anders DCOM), dus ook vanaf een beheerlaptop. Het account
+(`-Credential`) moet lokale beheerder zijn op de server. Een DAG-lid schakelt bij stoppen over naar een
+andere server.
+
+```powershell
+.\DecomExch.ps1 -Action ServiceStatus  -Server EX01
+.\DecomExch.ps1 -Action StopServices    -Server EX01 -IncludeIis            # simulatie
+.\DecomExch.ps1 -Action StopServices    -Server EX01 -IncludeIis -Execute   # echt
+.\DecomExch.ps1 -Action RestoreServices -Server EX01 -Execute
 ```
 
 ## Relaygebruik
@@ -284,7 +328,8 @@ daarom **Outlook**: er wordt een PST aan het Outlook-profiel gekoppeld, de gekoz
 ```
 
 Acties: `Web`, `Inventory`, `MailboxReport`, `RelayReport`, `PublicFolderReport`, `Readiness`, `HybridReport`, `ExportMailboxes`, `ExportPublicFolders`,
-`PstStatus`, `CleanLogs`, `CleanRequests`, `CleanDisconnectedMailboxes`, `CleanCertificates`, `CleanHybrid`.
+`PstStatus`, `CleanLogs`, `CleanRequests`, `CleanDisconnectedMailboxes`, `CleanCertificates`, `CleanHybrid`,
+`ServiceStatus`, `StopServices`, `RestoreServices`.
 
 De functies zijn ook los te gebruiken als module:
 
@@ -316,7 +361,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\DecomExch\DecomExch.p
 5. Opruimen: afgeronde aanvragen, losgekoppelde mailboxen, verlopen certificaten, lege databases.
    Staan alle mailboxen in Exchange Online: **hybride koppeling opruimen** (en de stappen in Exchange Online).
 6. DNS (MX, Autodiscover, SPF), firewall/NAT en load balancer bijwerken.
-7. Server enkele dagen **uitgeschakeld** laten staan en logs controleren op resterend verkeer.
+7. Server enkele dagen **uitgeschakeld** laten staan (of eerst alleen de **Exchange-diensten stoppen**,
+   terug te draaien met *Herstellen*) en logs controleren op resterend verkeer.
 8. Exchange verwijderen via *Programs and Features* of `Setup.exe /mode:Uninstall
    /IAcceptExchangeServerLicenseTerms_DiagnosticDataOFF`.
    Bij de laatste server met hybride/directory sync: niet verwijderen, maar overstappen op de

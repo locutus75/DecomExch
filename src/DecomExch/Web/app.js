@@ -107,8 +107,10 @@
       Mislukt: 'bad', Failed: 'bad', Simulatie: 'accent',
       InProgress: 'warn', Queued: 'warn', CompletionInProgress: 'warn', Suspended: 'warn', AutoSuspended: 'warn',
       Error: 'bad', Warning: 'warn', Success: 'ok', Action: 'accent',
+      Running: 'ok', Stopped: '', 'Stop Pending': 'warn', 'Start Pending': 'warn',
     };
-    const labels = { Geexporteerd: 'Geëxporteerd', Error: 'Fout', Warning: 'Waarschuwing', Success: 'Gelukt', Action: 'Actie' };
+    const labels = { Geexporteerd: 'Geëxporteerd', Error: 'Fout', Warning: 'Waarschuwing', Success: 'Gelukt', Action: 'Actie',
+      Running: 'Actief', Stopped: 'Gestopt', 'Stop Pending': 'Stoppen...', 'Start Pending': 'Starten...' };
     return h('span', { class: 'badge ' + (map[s] ?? ''), text: labels[s] || s || '-' });
   }
 
@@ -368,7 +370,7 @@
     clear(btn);
     const live = state.live;
     btn.className = 'btn ' + (live ? (btn.dataset.kind === 'destructive' ? 'danger' : 'primary') : 'primary');
-    append(btn, [icon(live ? (btn.dataset.kind === 'destructive' ? 'trash' : 'download') : 'shield'), live ? btn.dataset.live : btn.dataset.sim]);
+    append(btn, [icon(live ? ({ destructive: 'trash', restore: 'refresh' }[btn.dataset.kind] || 'download') : 'shield'), live ? btn.dataset.live : btn.dataset.sim]);
   }
   const updateActionButtons = () => document.querySelectorAll('button[data-kind]').forEach(updateActionButton);
 
@@ -1276,6 +1278,107 @@
     },
   };
 
+  // ---------- Exchange-diensten
+  pages.services = {
+    title: 'Exchange-diensten', icon: 'power', group: 'Opruimen',
+    async render(root) {
+      root.appendChild(h('p', { class: 'page-intro', text: 'Zet een server buiten gebruik zonder hem te verwijderen: alle Exchange-diensten in één keer stoppen en op Uitgeschakeld zetten, en later met één klik weer herstellen. Zo merk je wie de server nog gebruikt ("scream test"). Werkt ook als Exchange zelf niet meer draait.' }));
+      const servers = state.status.connected ? await loadServers().catch(() => []) : [];
+      const listId = 'svc-servers';
+      const server = h('input', { type: 'text', list: listId, placeholder: 'ex01.contoso.local', value: state.cache.svcServer || (servers.find((x) => !x.edge) || {}).name || '' });
+      const datalist = h('datalist', { id: listId }, servers.filter((x) => !x.edge).map((x) => h('option', { value: x.name })));
+      const iis = h('input', { type: 'checkbox', checked: !!state.cache.svcIis });
+      const statusTable = new DataTable({
+        empty: 'Haal eerst de status op.',
+        columns: [
+          { key: 'Dienst', label: 'Dienst', mono: true },
+          { key: 'Weergavenaam', label: 'Weergavenaam', wrap: true },
+          { key: 'Status', label: 'Status', format: statusBadge },
+          { key: 'Opstarttype', label: 'Opstarttype' },
+          { key: 'Oorspronkelijk', label: 'Oorspronkelijk (opgeslagen)' },
+        ],
+      });
+      const summary = h('div', { class: 'summary-line' });
+      const statusCard = h('div', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', { text: 'Server' }), h('div', { class: 'actions' },
+          h('button', { type: 'button', class: 'btn small', onclick: () => load() }, icon('refresh'), 'Status ophalen'))),
+        h('div', { class: 'card-body' }, h('div', { class: 'form' },
+          h('div', { class: 'form-row' }, h('div', { class: 'field' }, h('label', { text: 'Exchange-server' }), server, datalist)),
+          h('label', { class: 'check' }, iis, 'Ook IIS (W3SVC, WAS, IISADMIN): OWA, ECP, EWS, ActiveSync en Autodiscover reageren dan helemaal niet meer. Let op: ook andere websites op deze server stoppen.'),
+          h('span', { class: 'hint', text: 'Via WinRM (of DCOM) met het account van de start (-Credential); dat account moet lokale beheerder zijn op de server.' }),
+          summary)),
+        h('div', { class: 'card-body flush' }, statusTable.el));
+      root.appendChild(statusCard);
+
+      const load = async () => {
+        if (!server.value.trim()) { toast('Geef een server op.', 'warn'); return; }
+        state.cache.svcServer = server.value.trim(); state.cache.svcIis = iis.checked;
+        try {
+          const rows = await withBusy(statusCard, () => api('GET', `/api/services?server=${encodeURIComponent(server.value.trim())}${iis.checked ? '&iis=1' : ''}`), 'Diensten ophalen...', null);
+          statusTable.setRows(rows);
+          const running = rows.filter((r) => r.Status === 'Running').length;
+          const disabled = rows.filter((r) => r.Opstarttype === 'Disabled').length;
+          const saved = rows.some((r) => r.Oorspronkelijk);
+          clear(summary);
+          append(summary, [
+            h('span', { class: 'badge ' + (running ? 'ok' : ''), text: `${fmtNum(running)} van ${fmtNum(rows.length)} actief` }),
+            h('span', { class: 'badge ' + (disabled ? 'warn' : ''), text: `${fmtNum(disabled)} uitgeschakeld` }),
+            saved ? h('span', { class: 'badge accent', text: 'Oorspronkelijke toestand opgeslagen: herstellen mogelijk' }) : null,
+          ]);
+        } catch { /* gemeld */ }
+      };
+
+      const resultTable = (target, rows) => {
+        clear(target);
+        const done = rows.filter((r) => r.Uitgevoerd).length;
+        append(target, [
+          h('div', { class: 'summary-line' },
+            state.live ? h('span', { class: 'badge ' + (done === rows.length ? 'ok' : 'warn'), text: `${fmtNum(done)} van ${fmtNum(rows.length)} gelukt` }) : h('span', { class: 'badge accent', text: 'Simulatie: niets gewijzigd' })),
+          new DataTable({ rows, columns: [
+            { key: 'Dienst', label: 'Dienst', mono: true },
+            { key: 'WasStatus', label: 'Was', format: statusBadge },
+            { key: 'WasOpstarttype', label: 'Was opstarttype' },
+            { key: 'Status', label: 'Nu', format: statusBadge },
+            { key: 'Opstarttype', label: 'Opstarttype' },
+            { key: 'Uitgevoerd', label: 'Gelukt', format: removedBadge },
+            { key: 'Opmerking', label: 'Opmerking', wrap: true },
+          ] }).el,
+        ]);
+      };
+
+      const resultBox = h('div', { class: 'result' });
+      const resultCard = h('div', { class: 'card hidden' }, h('div', { class: 'card-head' }, h('h2', { text: 'Resultaat' })), h('div', { class: 'card-body' }, resultBox));
+      const run = async (card, path, what) => {
+        const srv = server.value.trim();
+        if (!srv) { toast('Geef een server op.', 'warn'); return; }
+        if (!(await confirmDestructive(`${what} op ${srv}`))) return;
+        try {
+          const rows = await withBusy(card, () => api('POST', path, { server: srv, includeIis: iis.checked, simulate: simulate(), confirm: state.live ? 'JA' : undefined }),
+            state.live ? `${what}... dit kan enkele minuten duren` : 'Simuleren...');
+          resultTable(resultBox, rows);
+          resultCard.querySelector('h2').textContent = `Resultaat: ${what} op ${srv}`;
+          resultCard.classList.remove('hidden');
+          if (state.live) await load();
+        } catch { /* gemeld */ }
+      };
+
+      const stopCard = h('div', { class: 'card danger-zone' },
+        h('div', { class: 'card-head' }, h('h2', { text: 'Stoppen en uitschakelen' })),
+        h('div', { class: 'card-body' },
+          h('p', { class: 'desc', text: 'Slaat eerst de huidige status en het opstarttype van elke dienst op (ook "vertraagd starten"), zet daarna alle Exchange-diensten op Uitgeschakeld en stopt ze, afhankelijke diensten eerst. Mailflow, OWA, Outlook en ActiveSync via deze server stoppen dan. Een DAG-lid schakelt over naar een andere server.' }),
+          h('div', { class: 'form' }, h('div', null, actionButton('destructive', { sim: 'Simuleren', live: 'Alle diensten stoppen' }, () => run(stopCard, '/api/services/stop', 'Exchange-diensten stoppen en uitschakelen'))))));
+      const restoreCard = h('div', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', { text: 'Herstellen (ongedaan maken)' })),
+        h('div', { class: 'card-body' },
+          h('p', { class: 'desc', text: 'Zet de opstarttypes terug zoals ze waren en start de diensten die draaiden. Zonder opgeslagen toestand (bijv. gestopt vanaf een andere computer) worden de standaardwaarden van Exchange gebruikt: Automatisch, behalve IMAP4/POP3 (Handmatig).' }),
+          h('div', { class: 'form' }, h('div', null, actionButton('restore', { sim: 'Simuleren', live: 'Diensten herstellen' }, () => run(restoreCard, '/api/services/restore', 'Exchange-diensten herstellen'))))));
+      root.appendChild(h('div', { class: 'grid two' }, stopCard, restoreCard));
+      root.appendChild(resultCard);
+
+      if (state.cache.svcServer) await load();
+    },
+  };
+
   // ---------- Logboek
   pages.log = {
     title: 'Logboek', icon: 'log', group: 'Opruimen',
@@ -1301,7 +1404,7 @@
     },
   };
 
-  const ORDER = ['dashboard', 'inventory', 'mailboxes', 'publicfolders', 'relay', 'readiness', 'export', 'cleanup', 'hybrid', 'log'];
+  const ORDER = ['dashboard', 'inventory', 'mailboxes', 'publicfolders', 'relay', 'readiness', 'export', 'cleanup', 'hybrid', 'services', 'log'];
 
   // ------------------------------------------------------------------ navigatie
   function buildNav() {

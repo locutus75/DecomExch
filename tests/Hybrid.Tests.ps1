@@ -97,6 +97,14 @@ Describe 'DecomExch hybride koppeling' {
             ($r.Controles | Where-Object Check -eq 'Remote mailboxen').Details | Should -Match '^2 remote'
             @($r.Handmatig).Count | Should -BeGreaterThan 5
             ($r.Handmatig | Where-Object Stap -eq 1).Opdracht | Should -Match 'contoso\.mail\.protection\.outlook\.com'
+            $steps = @($r.Handmatig)
+            @($steps | ForEach-Object { $_.Stap }) -join ',' | Should -Be ((1..$steps.Count) -join ',')
+            $install = [array]::IndexOf(@($steps | ForEach-Object { $_.Wat }), 'Module installeren (eenmalig)')
+            $connect = @($steps | Where-Object { $_.Opdracht -like 'Connect-ExchangeOnline*' })[0]
+            $install | Should -BeGreaterThan 0
+            $connect.Stap | Should -BeGreaterThan ($install + 1)
+            $connect.Opdracht | Should -Match '-DisableWAM'
+            ($steps | Where-Object Wat -eq 'Nieuw PowerShell-venster openen').Opdracht | Should -Match 'Exchange Management Shell'
         }
 
         It 'blokkeert bij mailboxen on-premises en waarschuwt voor de MX' {
@@ -224,7 +232,7 @@ Describe 'DecomExch hybride koppeling' {
         It 'simuleert standaard en vraagt bevestiging voor een echte uitvoering' {
             InModuleScope DecomExch {
                 $state = @{ OutputPath = $TestDrive }
-                $sim = @(Invoke-DxApiRoute -Method POST -Path '/api/clean/hybrid' -Body ([pscustomobject]@{ ids = @('RemoteDomain|Hybrid Domain - contoso.mail.onmicrosoft.com') }) -State $state)
+                $sim = Invoke-DxApiRoute -Method POST -Path '/api/clean/hybrid' -Body ([pscustomobject]@{ ids = @('RemoteDomain|Hybrid Domain - contoso.mail.onmicrosoft.com') }) -State $state
                 $sim.Count | Should -Be 1
                 $sim[0].Uitgevoerd | Should -BeFalse
                 $global:DxHybridCalls.Count | Should -Be 0
@@ -233,7 +241,7 @@ Describe 'DecomExch hybride koppeling' {
                 { Invoke-DxApiRoute -Method POST -Path '/api/clean/hybrid' -Body $body -State $state } | Should -Throw -ExceptionType ([System.ArgumentException])
 
                 $body = [pscustomobject]@{ ids = @('RemoteDomain|Hybrid Domain - contoso.mail.onmicrosoft.com'); simulate = $false; confirm = 'JA' }
-                $live = @(Invoke-DxApiRoute -Method POST -Path '/api/clean/hybrid' -Body $body -State $state)
+                $live = Invoke-DxApiRoute -Method POST -Path '/api/clean/hybrid' -Body $body -State $state
                 $live[0].Uitgevoerd | Should -BeTrue
                 @($global:DxHybridCalls) | Should -Be @('Remove-RemoteDomain Hybrid Domain - contoso.mail.onmicrosoft.com')
                 Test-Path (Join-Path $TestDrive 'Backup') | Should -BeTrue

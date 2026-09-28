@@ -335,18 +335,24 @@ function Get-DxHybridManualStep {
         Where-Object { $_ -match '^([^.]+)\.mail\.onmicrosoft\.com$' } | ForEach-Object { $Matches[1] } | Select-Object -First 1
     if (-not $tenant) { $tenant = '<tenant>' }
 
-    $step = { param($n, $where, $what, $cmd) [pscustomobject]@{ Stap = $n; Waar = $where; Wat = $what; Opdracht = $cmd } }
-    & $step 1 'DNS' 'MX-records naar Exchange Online' "MX -> $tenant.mail.protection.outlook.com (of je mailfilter)"
-    & $step 2 'DNS' 'Autodiscover naar Exchange Online' 'autodiscover.<domein>  CNAME  autodiscover.outlook.com'
-    & $step 3 'DNS' 'SPF bijwerken' 'Verwijder de on-premises IP-adressen uit het SPF-record; houd include:spf.protection.outlook.com'
-    & $step 4 'Exchange Online' 'Verbinden' 'Connect-ExchangeOnline'
-    & $step 5 'Exchange Online' 'Hybride connectors verwijderen' "Get-InboundConnector | Where-Object Name -like 'Inbound from *' | Remove-InboundConnector; Get-OutboundConnector | Where-Object Name -like 'Outbound to *' | Remove-OutboundConnector"
-    & $step 6 'Exchange Online' 'Organization relationship verwijderen' "Get-OrganizationRelationship | Where-Object Name -like 'O365 to On-premises*' | Remove-OrganizationRelationship"
-    & $step 7 'Exchange Online' 'OAuth-koppeling verwijderen' "Get-IntraOrganizationConnector | Where-Object Name -like 'HybridIOC*' | Remove-IntraOrganizationConnector"
-    & $step 8 'Exchange Online' 'Migratie-endpoints opruimen (na de laatste migratie)' 'Get-MigrationEndpoint | Remove-MigrationEndpoint'
-    & $step 9 'Hybrid Agent' 'Alleen bij moderne hybride (Hybrid Agent)' 'Verwijder de agent: Remove-HybridApplication (module HybridManagement) en deinstalleer "Microsoft Hybrid Service" op de agent-server.'
-    & $step 10 'Entra Connect' 'Synchronisatie laten staan' 'Laat Entra Connect gebruikers synchroniseren; beheer ontvangers met de Exchange Management Tools (Exchange 2019 CU12+ / SE) en Add-PSSnapin *RecipientManagement.'
-    & $step 11 'Exchange on-premises' 'Server uitfaseren' 'Voer de Uitfaseringscontrole uit en schakel de server daarna uit (laatste server: niet de-installeren als je de Management Tools-methode gebruikt).'
+    $steps = New-Object System.Collections.Generic.List[object]
+    $step = { param($where, $what, $cmd) $steps.Add([pscustomobject]@{ Stap = $steps.Count + 1; Waar = $where; Wat = $what; Opdracht = $cmd }) }
+    & $step 'DNS' 'MX-records naar Exchange Online' "MX -> $tenant.mail.protection.outlook.com (of je mailfilter)"
+    & $step 'DNS' 'Autodiscover naar Exchange Online' 'autodiscover.<domein>  CNAME  autodiscover.outlook.com'
+    & $step 'DNS' 'SPF bijwerken' 'Verwijder de on-premises IP-adressen uit het SPF-record; houd include:spf.protection.outlook.com'
+    & $step 'Exchange Online' 'Nieuw PowerShell-venster openen' 'Gebruik NIET de Exchange Management Shell of het venster van DecomExch: on-premises en Exchange Online hebben cmdlets met dezelfde naam (bijv. Get-OrganizationRelationship), dus een opdracht kan op de verkeerde omgeving terechtkomen. Sluit ook vensters met Az-, Graph- of MSOnline-modules (conflict met Microsoft.Identity.Client).'
+    & $step 'Exchange Online' 'Module installeren (eenmalig)' '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Set-ExecutionPolicy -Scope CurrentUser RemoteSigned; Install-Module ExchangeOnlineManagement -Scope CurrentUser   (al geinstalleerd: Update-Module ExchangeOnlineManagement)'
+    & $step 'Exchange Online' 'Verbinden met een Microsoft 365-beheeraccount (Exchange Administrator)' "Connect-ExchangeOnline -UserPrincipalName beheerder@<domein>   (aanmeldvenster geeft een fout: voeg -DisableWAM toe, of gebruik Connect-ExchangeOnline -Device en meld je aan in de browser)"
+    & $step 'Exchange Online' 'Controleren wat er wordt verwijderd' "Get-InboundConnector | Where-Object Name -like 'Inbound from *' | Format-Table Name, Enabled; Get-OutboundConnector | Where-Object Name -like 'Outbound to *' | Format-Table Name, Enabled; Get-OrganizationRelationship | Format-Table Name, DomainNames; Get-IntraOrganizationConnector | Format-Table Name, TargetAddressDomains"
+    & $step 'Exchange Online' 'Hybride connectors verwijderen' "Get-InboundConnector | Where-Object Name -like 'Inbound from *' | Remove-InboundConnector; Get-OutboundConnector | Where-Object Name -like 'Outbound to *' | Remove-OutboundConnector"
+    & $step 'Exchange Online' 'Organization relationship verwijderen' "Get-OrganizationRelationship | Where-Object Name -like 'O365 to On-premises*' | Remove-OrganizationRelationship"
+    & $step 'Exchange Online' 'OAuth-koppeling verwijderen' "Get-IntraOrganizationConnector | Where-Object Name -like 'HybridIOC*' | Remove-IntraOrganizationConnector"
+    & $step 'Exchange Online' 'Migratie-endpoints opruimen (na de laatste migratie)' 'Get-MigrationEndpoint | Remove-MigrationEndpoint'
+    & $step 'Exchange Online' 'Verbinding sluiten' 'Disconnect-ExchangeOnline -Confirm:$false'
+    & $step 'Hybrid Agent' 'Alleen bij moderne hybride (Hybrid Agent)' 'Verwijder de agent: Remove-HybridApplication (module HybridManagement) en deinstalleer "Microsoft Hybrid Service" op de agent-server.'
+    & $step 'Entra Connect' 'Synchronisatie laten staan' 'Laat Entra Connect gebruikers synchroniseren; beheer ontvangers met de Exchange Management Tools (Exchange 2019 CU12+ / SE) en Add-PSSnapin *RecipientManagement.'
+    & $step 'Exchange on-premises' 'Server uitfaseren' 'Voer de Uitfaseringscontrole uit en schakel de server daarna uit (laatste server: niet de-installeren als je de Management Tools-methode gebruikt).'
+    $steps.ToArray()
 }
 
 function Invoke-DxHybridAction {

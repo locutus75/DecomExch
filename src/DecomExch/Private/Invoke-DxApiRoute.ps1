@@ -395,6 +395,40 @@ function Invoke-DxApiRoute {
             return ,@(Remove-DxHybridConfiguration @params | ConvertTo-DxJsonSafe)
         }
 
+        'GET /api/services' {
+            $server = "$($Query['server'])".Trim()
+            if (-not $server) { throw (New-Object System.ArgumentException 'Kies een server.') }
+            return ,@(Get-DxExchangeService -ComputerName $server -IncludeIis:([bool]$Query['iis']) -StatePath (Join-Path -Path $State['OutputPath'] -ChildPath 'Diensten') | ConvertTo-DxJsonSafe)
+        }
+
+        'POST /api/services/stop' {
+            Assert-DxConfirmed -Simulate $simulate -Body $Body
+            $server = "$(Get-DxBodyValue -Body $Body -Name 'server' -Default '')".Trim()
+            if (-not $server) { throw (New-Object System.ArgumentException 'Kies een server.') }
+            $params = @{
+                ComputerName = $server
+                IncludeIis   = [bool](Get-DxBodyValue -Body $Body -Name 'includeIis' -Default $false)
+                StatePath    = (Join-Path -Path $State['OutputPath'] -ChildPath 'Diensten')
+                WhatIf       = $simulate
+                Confirm      = $false
+            }
+            return ,@(Stop-DxExchangeService @params | ConvertTo-DxJsonSafe)
+        }
+
+        'POST /api/services/restore' {
+            Assert-DxConfirmed -Simulate $simulate -Body $Body
+            $server = "$(Get-DxBodyValue -Body $Body -Name 'server' -Default '')".Trim()
+            if (-not $server) { throw (New-Object System.ArgumentException 'Kies een server.') }
+            $params = @{
+                ComputerName = $server
+                IncludeIis   = [bool](Get-DxBodyValue -Body $Body -Name 'includeIis' -Default $false)
+                StatePath    = (Join-Path -Path $State['OutputPath'] -ChildPath 'Diensten')
+                WhatIf       = $simulate
+                Confirm      = $false
+            }
+            return ,@(Restore-DxExchangeService @params | ConvertTo-DxJsonSafe)
+        }
+
         'GET /api/log' {
             # Nieuwste eerst, maximaal 300 regels.
             $lines = $script:DxLogBuffer.ToArray()
