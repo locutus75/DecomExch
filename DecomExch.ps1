@@ -18,7 +18,8 @@
 .PARAMETER Action
     Menu (standaard), Web, Inventory, MailboxReport, PublicFolderReport, RelayReport, Readiness,
     HybridReport, ExportMailboxes, ExportPublicFolders, PstStatus,
-    CleanLogs, CleanRequests, CleanDisconnectedMailboxes, CleanCertificates, CleanHybrid.
+    CleanLogs, CleanRequests, CleanDisconnectedMailboxes, CleanCertificates, CleanHybrid,
+    ServiceStatus, StopServices, RestoreServices.
 
 .PARAMETER Execute
     Alleen voor niet-interactieve export- en opruimacties: voer de actie echt uit.
@@ -62,12 +63,19 @@
 
     Simuleert het opruimen van de hybride koppeling met Exchange Online (met -Execute echt uitvoeren;
     er wordt eerst een back-up gemaakt in <OutputPath>\Backup).
+
+.EXAMPLE
+    .\DecomExch.ps1 -Action StopServices -Server EX01 -IncludeIis -Execute
+
+    Stopt alle Exchange-diensten (en IIS) op EX01 en zet ze op Disabled. De oorspronkelijke toestand
+    staat in <OutputPath>\Diensten; -Action RestoreServices -Server EX01 -Execute zet alles terug.
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Menu', 'Web', 'Inventory', 'MailboxReport', 'PublicFolderReport', 'RelayReport', 'Readiness', 'HybridReport',
         'ExportMailboxes', 'ExportPublicFolders', 'PstStatus',
-        'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates', 'CleanHybrid')]
+        'CleanLogs', 'CleanRequests', 'CleanDisconnectedMailboxes', 'CleanCertificates', 'CleanHybrid',
+        'ServiceStatus', 'StopServices', 'RestoreServices')]
     [string]$Action = 'Menu',
 
     [string]$Server,
@@ -126,12 +134,15 @@ param(
     [string[]]$Domain,
 
     # CleanHybrid: ook uitvoeren als er nog mailboxen of migraties on-premises zijn.
-    [switch]$Force
+    [switch]$Force,
+
+    # StopServices/RestoreServices/ServiceStatus: ook IIS (W3SVC, WAS, IISADMIN).
+    [switch]$IncludeIis
 )
 
 $ErrorActionPreference = 'Stop'
 
-if ($Credential -ne [pscredential]::Empty -and -not $ExchangeServer) {
+if ($Credential -ne [pscredential]::Empty -and -not $ExchangeServer -and $Action -notin 'ServiceStatus', 'StopServices', 'RestoreServices') {
     throw 'Geef ook -ExchangeServer op: -Credential wordt gebruikt voor de remote verbinding met die server.'
 }
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'src\DecomExch\DecomExch.psd1') -Force -DisableNameChecking
@@ -271,6 +282,19 @@ function Invoke-Task {
                 Export-DxReport -Path $OutputPath -Title 'Hybride koppeling'
             Write-Host "Rapport: $report" -ForegroundColor Green
         }
+        'ServiceStatus' {
+            $rows = @(Get-DxExchangeService -ComputerName $Options.Server -IncludeIis:$Options.IncludeIis -StatePath $serviceStatePath @serviceCredential)
+            Show-Result -Result $rows -Empty 'Geen Exchange-diensten gevonden.' -Property Dienst, Weergavenaam, Status, Opstarttype, Oorspronkelijk
+        }
+        'StopServices' {
+            $rows = @(Stop-DxExchangeService -ComputerName $Options.Server -IncludeIis:$Options.IncludeIis -StatePath $serviceStatePath @serviceCredential @whatIf)
+            Show-Result -Result $rows -Empty 'Geen Exchange-diensten gevonden.' -Property Dienst, WasStatus, WasOpstarttype, Status, Opstarttype, Uitgevoerd, Opmerking
+            if (-not $Simulate) { Write-Host "Oorspronkelijke toestand: $serviceStatePath. Ongedaan maken: -Action RestoreServices (of menu 16)." -ForegroundColor Cyan }
+        }
+        'RestoreServices' {
+            $rows = @(Restore-DxExchangeService -ComputerName $Options.Server -IncludeIis:$Options.IncludeIis -StatePath $serviceStatePath @serviceCredential @whatIf)
+            Show-Result -Result $rows -Empty 'Geen Exchange-diensten gevonden.' -Property Dienst, WasStatus, Status, Opstarttype, Uitgevoerd, Opmerking
+        }
         'ExportMailboxes' {
             $params = @{ FilePath = $Options.PstPath; IncludeArchive = [bool]$Options.IncludeArchive }
             if ($Options.Database) { $params['Database'] = $Options.Database }
@@ -335,7 +359,11 @@ $defaults = @{
     LogPath      = $LogPath
     Domain       = $Domain
     Force        = [bool]$Force
+    IncludeIis   = [bool]$IncludeIis
 }
+$serviceStatePath = Join-Path -Path $OutputPath -ChildPath 'Diensten'
+$serviceCredential = @{}
+if ($Credential -ne [pscredential]::Empty) { $serviceCredential['Credential'] = $Credential }
 
 # --- Webinterface -------------------------------------------------------------------
 if ($Action -eq 'Web') {
@@ -352,15 +380,16 @@ if ($Action -eq 'Web') {
 
 # --- Niet-interactief --------------------------------------------------------------
 if ($Action -ne 'Menu') {
-    $offline = $Action -eq 'ExportPublicFolders' -or ($Action -eq 'RelayReport' -and $defaults.RelaySource -eq 'Path')
+    # Diensten gaan via CIM en werken ook als Exchange zelf niet draait.
+    $offline = $Action -in 'ExportPublicFolders', 'ServiceStatus', 'StopServices', 'RestoreServices' -or ($Action -eq 'RelayReport' -and $defaults.RelaySource -eq 'Path')
     if (-not $offline) { Initialize-Connection }
-    if ($Action -in 'Readiness', 'CleanLogs' -and -not $Server) {
+    if ($Action -in 'Readiness', 'CleanLogs', 'ServiceStatus', 'StopServices', 'RestoreServices' -and -not $Server) {
         throw "Geef -Server op voor actie '$Action'."
     }
     if ($Action -in 'ExportMailboxes', 'ExportPublicFolders' -and -not $PstPath) {
         throw "Geef -PstPath op voor actie '$Action'."
     }
-    if (-not $Execute -and ($Action -like 'Clean*' -or $Action -like 'Export*')) {
+    if (-not $Execute -and ($Action -like 'Clean*' -or $Action -like 'Export*' -or $Action -in 'StopServices', 'RestoreServices')) {
         Write-Host 'Simulatiemodus (-WhatIf). Gebruik -Execute om echt uit te voeren.' -ForegroundColor Cyan
     }
     Invoke-Task -Name $Action -Simulate (-not $Execute) -Options $defaults
@@ -384,6 +413,9 @@ $menu = [ordered]@{
     '12' = @{ Group = 'Opruimen';                Task = 'CleanDisconnectedMailboxes'; Text = 'Losgekoppelde mailboxen definitief verwijderen';       Confirm = $true }
     '13' = @{ Group = 'Opruimen';                Task = 'CleanCertificates';          Text = 'Verlopen certificaten verwijderen';                    Confirm = $true }
     '14' = @{ Group = 'Opruimen';                Task = 'CleanHybrid';                Text = 'Hybride koppeling met Exchange Online opruimen';        Confirm = $true }
+    '15' = @{ Group = 'Diensten';                Task = 'ServiceStatus';              Text = 'Status van de Exchange-diensten' }
+    '16' = @{ Group = 'Diensten';                Task = 'StopServices';               Text = 'Alle Exchange-diensten stoppen en uitschakelen';       Confirm = $true }
+    '17' = @{ Group = 'Diensten';                Task = 'RestoreServices';            Text = 'Exchange-diensten herstellen (stoppen ongedaan maken)'; Confirm = $true }
 }
 
 try {
@@ -391,7 +423,7 @@ try {
 }
 catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host 'Zonder Exchange-verbinding werken alleen "Relaygebruik" (map met logbestanden) en "Public folders exporteren naar PST (via Outlook)".' -ForegroundColor Yellow
+    Write-Host 'Zonder Exchange-verbinding werken alleen "Relaygebruik" (map met logbestanden), "Public folders exporteren naar PST (via Outlook)" en de Exchange-diensten (15-17).' -ForegroundColor Yellow
 }
 
 while ($true) {
@@ -419,6 +451,12 @@ while ($true) {
     try {
         switch ($item.Task) {
             { $_ -in 'Readiness', 'CleanLogs', 'CleanCertificates' } { $options.Server = Read-Server -Default $Server }
+            { $_ -in 'ServiceStatus', 'StopServices', 'RestoreServices' } {
+                $connected = [bool](Get-Command -Name Get-ExchangeServer -ErrorAction SilentlyContinue)
+                $options.Server = if ($connected) { Read-Server -Default $Server } else { Read-Value -Prompt 'Server' -Default $Server }
+                if (-not $options.Server) { throw 'Geef een server op.' }
+                if ($_ -ne 'ServiceStatus') { $options.IncludeIis = Read-YesNo -Prompt 'Ook IIS stoppen/herstellen (OWA, EWS, ActiveSync, Autodiscover)?' -Default ([bool]$IncludeIis) }
+            }
             { $_ -in 'CleanLogs', 'CleanDisconnectedMailboxes' } { $options.Days = Read-Days -Default $OlderThanDays }
             'CleanHybrid' {
                 $options.Force = $Force
