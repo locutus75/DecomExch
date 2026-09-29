@@ -15,7 +15,7 @@ function Get-DxExchangeInstallPath {
         return $env:ExchangeInstallPath.TrimEnd('\')
     }
 
-    if (-not $isLocal -and (Test-DxCommand -Name 'Get-ExchangeServer')) {
+    if (-not $isLocal -and (Test-DxExchangeConnection)) {
         $server = Get-ExchangeServer -Identity $ComputerName -ErrorAction SilentlyContinue
         if ($server -and $server.PSObject.Properties['DataPath'] -and $server.DataPath) {
             # DataPath is <install>\Mailbox; de installatiemap is de bovenliggende map.

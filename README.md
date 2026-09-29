@@ -72,6 +72,7 @@ met de server; de Exchange-beheertools zijn daarvoor niet nodig.
 | *HTTP bad request status (400)* met `Negotiate` of `Basic` | Exchange accepteert voor remote PowerShell standaard alleen Kerberos. Verbind met Kerberos (zie de eerste regel). |
 | *TrustedHosts* | Alleen nodig zonder Kerberos. Controleer eerst `Get-Item WSMan:\localhost\Client\TrustedHosts`: staat daar `*`, dan is het al goed; is het leeg, gebruik `Set-Item WSMan:\localhost\Client\TrustedHosts -Value <server> -Force` (met `-Concatenate` als er al andere servers staan). |
 | *Access is denied* | Verkeerd wachtwoord, of het account is geen Exchange-beheerder of mag geen remote PowerShell gebruiken. |
+| *failed with the following error message : For more information* (lege melding) of *Creating a new session for implicit remoting* | Exchange PowerShell reageert niet, meestal omdat de Exchange-diensten gestopt zijn. DecomExch ruimt de verbroken sessie op en start zonder verbinding; herstel de diensten via de pagina **Exchange-diensten** (werkt zonder Exchange-verbinding) of met `-Action RestoreServices`. |
 
 In de webinterface kies je de aanmeldmethode in het venster **Verbinden**; de inloggegevens van
 `-Credential` worden daarbij hergebruikt, ook als de eerste poging bij het starten mislukte.

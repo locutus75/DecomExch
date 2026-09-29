@@ -42,12 +42,19 @@ function Connect-DxExchange {
             $script:DxSessionModule = $null
             $script:DxExchangeServer = $null
         }
+        # Cmdlets van een eerdere (verbroken) sessie in dit venster opruimen, anders blijven die opnieuw verbinden.
+        foreach ($stale in @(Get-DxImplicitExchangeModule)) { Remove-Module -ModuleInfo $stale -Force -ErrorAction SilentlyContinue }
 
         $params = @{
             ConfigurationName = 'Microsoft.Exchange'
             ConnectionUri     = "http://$Server/PowerShell/"
             Authentication    = $Authentication
             ErrorAction       = 'Stop'
+        }
+        # Niet minutenlang wachten als de server of Exchange niet reageert (alleen waar de optie bestaat).
+        $optionCommand = Get-Command -Name New-PSSessionOption -ErrorAction SilentlyContinue
+        if ($optionCommand -and $optionCommand.Parameters.ContainsKey('OpenTimeout')) {
+            $params['SessionOption'] = New-PSSessionOption -OpenTimeout 60000 -OperationTimeout 300000
         }
         if ($hasCredential) { $params['Credential'] = $Credential }
 
@@ -70,7 +77,7 @@ function Connect-DxExchange {
         $script:DxSessionModule = $connection.Module
         $script:DxExchangeServer = $Server
     }
-    elseif (Test-DxCommand -Name 'Get-ExchangeServer') {
+    elseif (Test-DxExchangeConnection) {
         Write-DxLog -Level Success -Message 'Exchange-cmdlets zijn al beschikbaar.'
         return
     }

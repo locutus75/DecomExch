@@ -139,7 +139,7 @@ function Invoke-DxApiRoute {
 
     switch ($route) {
         'GET /api/status' {
-            $connected = Test-DxCommand -Name 'Get-ExchangeServer'
+            $connected = Test-DxExchangeConnection
             if ($connected -and -not $State['Organization']) {
                 $State['Organization'] = Invoke-DxSafe -Section 'Organisatie' -Action { "$((Get-OrganizationConfig -ErrorAction Stop).Name)" }
             }
@@ -174,7 +174,7 @@ function Invoke-DxApiRoute {
             }
             $State['Organization'] = $null
             $State['Inventory'] = $null
-            return [ordered]@{ connected = (Test-DxCommand -Name 'Get-ExchangeServer') }
+            return [ordered]@{ connected = (Test-DxExchangeConnection) }
         }
 
         'GET /api/servers' {

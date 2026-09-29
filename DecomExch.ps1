@@ -153,7 +153,8 @@ function Initialize-Connection {
     if ($ExchangeServer) {
         Connect-DxExchange -Server $ExchangeServer -Credential $Credential -Authentication $Authentication
     }
-    elseif (-not (Get-Command -Name Get-ExchangeServer -ErrorAction SilentlyContinue)) {
+    else {
+        # Doet niets als er al een werkende verbinding is; ruimt een verbroken sessie op.
         Connect-DxExchange
     }
 }
