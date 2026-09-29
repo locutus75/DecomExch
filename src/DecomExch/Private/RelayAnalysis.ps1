@@ -35,7 +35,7 @@ function Get-DxExchangeServerAddress {
     [OutputType([string])]
     param()
 
-    if (-not (Test-DxCommand -Name 'Get-ExchangeServer')) { return }
+    if (-not (Test-DxExchangeConnection)) { return }
     foreach ($server in @(Get-ExchangeServer -ErrorAction SilentlyContinue)) {
         $name = if ($server.PSObject.Properties['Fqdn'] -and $server.Fqdn) { "$($server.Fqdn)" } else { "$($server.Name)" }
         try { [System.Net.Dns]::GetHostAddresses($name) | ForEach-Object { $_.IPAddressToString } } catch { }
@@ -241,7 +241,7 @@ function Invoke-DxRelayAnalysis {
     $records = New-Object System.Collections.Generic.List[object]
     $fileCount = 0
     $usedSource = $Source
-    $connected = Test-DxCommand -Name 'Get-ExchangeServer'
+    $connected = Test-DxExchangeConnection
 
     if ($Source -eq 'Path') {
         if (-not $Path) { throw (New-Object System.ArgumentException 'Geef een map met logbestanden op (-Path).') }

@@ -53,5 +53,10 @@ function Get-DxConnectionHint {
         return ("OPLOSSING: $Server is niet bereikbaar. Controleer de naam (volledige naam, bijv. ex01.contoso.local), DNS en of poort 80 open staat " +
             "(Test-NetConnection $Server -Port 80).")
     }
+    if ($Message -match 'error message\s*:\s*For more information|\(500\)|Internal Server Error') {
+        return ('OPLOSSING: de server reageert, maar Exchange PowerShell niet. Draaien de Exchange-diensten nog? Zijn ze met ' +
+            'DecomExch gestopt, herstel ze dan via de pagina Exchange-diensten (dit werkt zonder Exchange-verbinding) of met ' +
+            ".\DecomExch.ps1 -Action RestoreServices -Server $Server -Credential <account> -Execute.")
+    }
     'Controleer de servernaam (gebruik bij Kerberos de volledige naam, bijv. ex01.contoso.local), of poort 80 bereikbaar is en of het account Exchange-beheerder is.'
 }

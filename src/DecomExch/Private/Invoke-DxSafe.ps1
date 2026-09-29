@@ -22,5 +22,10 @@ function Invoke-DxSafe {
     }
     catch {
         Write-DxLog -Level Warning -Message "Onderdeel '$Section' kon niet worden opgehaald: $($_.Exception.Message)"
+        # Verbroken remote sessie: opruimen, zodat de volgende onderdelen niet elk opnieuw gaan verbinden.
+        if ($_.Exception -is [System.Management.Automation.Remoting.PSRemotingTransportException] -or
+            $_.Exception.Message -match 'No session has been associated|implicit remoting|PSSessionStateBroken|The session state is Broken') {
+            [void](Test-DxExchangeConnection)
+        }
     }
 }
