@@ -115,6 +115,29 @@ Describe 'DecomExch webinterface' {
                 $o.kpis.openMoveRequests | Should -Be 1
             }
         }
+
+        It 'werkt met lege onderdelen (geen public folders, mailboxen zonder grootte)' {
+            InModuleScope DecomExch {
+                $inventory = [ordered]@{
+                    'Servers'        = @([pscustomobject]@{ Name = 'EX01' })
+                    'Mailboxen'      = @([pscustomobject]@{ DisplayName = 'A'; GrootteMB = $null; Inactief = $false })
+                    'Public folders' = @()
+                }
+                $o = Get-DxOverview -Inventory $inventory
+                $o.kpis.mailboxSizeGb | Should -Be 0
+                $o.kpis.publicFolders | Should -Be 0
+                $o.kpis.publicFolderSizeMb | Should -Be 0
+                { ConvertTo-Json -InputObject $o -Depth 5 } | Should -Not -Throw
+            }
+        }
+
+        It 'Get-DxSum telt op en geeft 0 bij lege invoer' {
+            InModuleScope DecomExch {
+                Get-DxSum -InputObject @() -Property 'X' | Should -Be 0
+                Get-DxSum -InputObject $null -Property 'X' | Should -Be 0
+                Get-DxSum -InputObject @([pscustomobject]@{ X = 1.5 }, [pscustomobject]@{ X = $null }, [pscustomobject]@{ Y = 3 }, @{ X = 2 }) -Property 'X' | Should -Be 3.5
+            }
+        }
     }
 
     Context 'Invoke-DxApiRoute' {

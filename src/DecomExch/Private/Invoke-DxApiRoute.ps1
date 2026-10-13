@@ -85,8 +85,8 @@ function Get-DxOverview {
     $certs = @(& $section 'Certificaten')
     $moves = @(& $section 'Verplaatsaanvragen')
 
-    $sizeMb = ($mailboxes | Where-Object { $_.PSObject.Properties['GrootteMB'] -and $null -ne $_.GrootteMB } | Measure-Object -Property GrootteMB -Sum).Sum
-    $pfSizeMb = ($publicFolders | Where-Object { $_.PSObject.Properties['GrootteMB'] -and $null -ne $_.GrootteMB } | Measure-Object -Property GrootteMB -Sum).Sum
+    $sizeMb = Get-DxSum -InputObject $mailboxes -Property 'GrootteMB'
+    $pfSizeMb = Get-DxSum -InputObject $publicFolders -Property 'GrootteMB'
 
     [ordered]@{
         generated = $Generated.ToString('yyyy-MM-dd HH:mm')
@@ -336,9 +336,9 @@ function Invoke-DxApiRoute {
                 return [ordered]@{
                     simulated = $true
                     files     = $files.Count
-                    sizeMb    = [math]::Round(([double]($files | Measure-Object -Property Length -Sum).Sum) / 1MB, 1)
+                    sizeMb    = [math]::Round((Get-DxSum -InputObject $files -Property 'Length') / 1MB, 1)
                     folders   = @($files | Group-Object -Property DirectoryName | Sort-Object Name | ForEach-Object {
-                        [ordered]@{ Map = $_.Name; Bestanden = $_.Count; MB = [math]::Round(([double]($_.Group | Measure-Object -Property Length -Sum).Sum) / 1MB, 1) }
+                        [ordered]@{ Map = $_.Name; Bestanden = $_.Count; MB = [math]::Round((Get-DxSum -InputObject $_.Group -Property 'Length') / 1MB, 1) }
                     })
                 }
             }
